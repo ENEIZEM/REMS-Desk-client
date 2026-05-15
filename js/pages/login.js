@@ -1,7 +1,14 @@
 /* ═══════════════════════════════════════════════════════════════
    REMS — Login page logic
-   Step 1: password → POST /api/auth/login { email, password }
-   Step 2: PIN      → POST /api/auth/login { email, pin }
+
+   Two entry paths:
+     • step-password: contact + password + PIN
+         For new devices, expired tokens, fresh installs.
+         All three fields required.
+     • step-pin: 6-digit PIN only
+         For returning users on the same device — a valid token is
+         already in localStorage, so backend skips password and just
+         checks PIN. This is the "quick unlock" path.
 
    NOTE: Uses async IIFE instead of top-level await for maximum
    browser compatibility (avoids issues with older Chromium builds).
@@ -9,65 +16,202 @@
 
 import { auth, getDeviceId }                 from '../api.js';
 import { requireGuest, toast, errorMessage } from '../auth.js';
-import { t, initI18n }                       from '../i18n.js';
+import { t, initI18n, onLangChange, applyTranslations } from '../i18n.js';
+import { wireFormGuard }                     from '../form-guard.js';
 
-// ── Helpers (hoisted, available everywhere in module) ─────────────
+// ── Hoisted helpers ─────────────────────────────────────────────
 function q(sel) { return document.querySelector(sel); }
 function setLoading(btn, on) {
   if (!btn) return;
   btn.disabled = on;
   btn.classList.toggle('btn-loading', on);
 }
-function getPinValue() {
-  return [...document.querySelectorAll('.pin-input')].map(i => i.value).join('');
+function joinDigits(nodeList) {
+  return [...nodeList].map(i => i.value).join('');
 }
+
+// i18n-friendly error rendering: every visible error text stores its
+// i18n key on data-i18n so applyTranslations() can re-resolve it on
+// language switch.
+
 function clearErrors() {
-  document.querySelectorAll('.form-error').forEach(el => el.classList.remove('show'));
+  document.querySelectorAll('.form-error').forEach(el => {
+    el.classList.remove('show');
+    const span = el.querySelector('span');
+    if (span) { span.removeAttribute('data-i18n'); span.textContent = ''; }
+  });
   document.querySelectorAll('.form-input.error').forEach(el => el.classList.remove('error'));
+  document.querySelectorAll('.pin-input.error').forEach(el => el.classList.remove('error'));
   hideAlert('err-login');
+  hideAlert('err-pin');
 }
-function showFieldError(id, msg) {
+function showFieldError(id, key) {
   const el = document.getElementById(id);
   if (!el) return;
   const span = el.querySelector('span');
-  if (span) span.textContent = msg;
+  if (span) {
+    span.setAttribute('data-i18n', key);
+    span.textContent = t(key);
+  }
   el.classList.add('show');
   el.closest('.form-group')?.querySelector('.form-input')?.classList.add('error');
   el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
-function showAlert(alertId, textId, msg) {
+function showAlertKey(alertId, textId, key, fallback) {
   const alertEl = document.getElementById(alertId);
   if (!alertEl) return;
   alertEl.classList.add('show');
   const el = document.getElementById(textId);
-  if (el) el.textContent = msg;
+  if (el) {
+    el.setAttribute('data-i18n', key);
+    const translated = t(key);
+    el.textContent = (translated !== key) ? translated : (fallback || translated);
+  }
   alertEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
-function hideAlert(id) { document.getElementById(id)?.classList.remove('show'); }
+function showAlertFromError(alertId, textId, err) {
+  const key = err?.error_key || 'errors.server_error';
+  showAlertKey(alertId, textId, key, err?.message || errorMessage(err));
+}
+function hideAlert(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove('show');
+  const txt = el.querySelector('[id$="-text"]');
+  if (txt) { txt.removeAttribute('data-i18n'); txt.textContent = ''; }
+  // Cancel any live countdown attached to this alert.
+  if (el._countdownTimer) {
+    clearInterval(el._countdownTimer);
+    el._countdownTimer = null;
+  }
+}
+
+// Format a number of seconds as "M:SS" — used in lock-timer alerts so the
+// user sees exactly when they can retry. Always shows minutes:seconds even
+// for small values (e.g. "0:35"), which reads more clearly than "35s".
+function fmtCountdown(secs) {
+  const s = Math.max(0, Math.ceil(secs));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${r.toString().padStart(2, '0')}`;
+}
+
+// Render the alert text by interpolating {n} / {time} from a params bag.
+// If a live `retry_after` (seconds) is present, install a 1s interval that
+// keeps the countdown text fresh until it hits 0.
+function showAlertWithParams(alertId, textId, key, params = {}) {
+  const alertEl = document.getElementById(alertId);
+  if (!alertEl) return;
+  alertEl.classList.add('show');
+  const el = document.getElementById(textId);
+  if (!el) return;
+  // Cancel any previous countdown bound to this alert.
+  if (alertEl._countdownTimer) {
+    clearInterval(alertEl._countdownTimer);
+    alertEl._countdownTimer = null;
+  }
+  el.removeAttribute('data-i18n');
+
+  const render = (extra = {}) => {
+    const all = { ...params, ...extra };
+    let txt = t(key);
+    if (txt === key) txt = '';     // fall back to nothing-found; caller can pass a plain string
+    Object.entries(all).forEach(([k, v]) => {
+      txt = txt.replaceAll(`{${k}}`, String(v));
+    });
+    el.textContent = txt;
+  };
+
+  if (typeof params.retry_after === 'number' && params.retry_after > 0) {
+    const startedAt = Date.now();
+    const total     = params.retry_after;
+    const tick = () => {
+      const left = total - Math.floor((Date.now() - startedAt) / 1000);
+      if (left <= 0) {
+        clearInterval(alertEl._countdownTimer);
+        alertEl._countdownTimer = null;
+        // Keep the alert visible at 0:00 so the user can re-try with the
+        // same click — no flicker on the page.
+        render({ time: '0:00' });
+        return;
+      }
+      render({ time: fmtCountdown(left) });
+    };
+    tick();
+    alertEl._countdownTimer = setInterval(tick, 1000);
+  } else {
+    render();
+  }
+  alertEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// Generic wiring for any group of single-digit input boxes (PIN, code).
+// Auto-advance on type, backspace-to-previous, paste-fills, optional
+// onSubmit() callback fires when all boxes are filled.
+function wireDigitBoxes(inputs, { onSubmit } = {}) {
+  inputs.forEach((input, idx) => {
+    input.addEventListener('input', () => {
+      input.classList.remove('error');
+      input.value = input.value.replace(/\D/, '').slice(0, 1);
+      input.classList.toggle('filled', !!input.value);
+      if (input.value && idx < inputs.length - 1) inputs[idx + 1].focus();
+      if (joinDigits(inputs).length === inputs.length) onSubmit?.();
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Backspace' && !input.value && idx > 0) {
+        inputs[idx - 1].focus();
+        inputs[idx - 1].value = '';
+        inputs[idx - 1].classList.remove('filled');
+      }
+    });
+    input.addEventListener('paste', (e) => {
+      const raw = (e.clipboardData || window.clipboardData)
+        .getData('text').replace(/\D/g, '').slice(0, inputs.length);
+      if (!raw) return;
+      e.preventDefault();
+      [...raw].forEach((ch, i) => {
+        if (inputs[i]) {
+          inputs[i].value = ch;
+          inputs[i].classList.add('filled');
+        }
+      });
+      inputs[Math.min(raw.length, inputs.length) - 1]?.focus();
+      if (joinDigits(inputs).length === inputs.length) onSubmit?.();
+    });
+  });
+}
 
 // ─────────────────────────────────────────────────────────────────
-// BOOT — async IIFE (no top-level await: works in all ES-module
-// browsers including older Chromium/Safari builds)
+// BOOT
 // ─────────────────────────────────────────────────────────────────
 (async () => {
   try { await initI18n(); } catch (e) { console.error('[login] i18n failed:', e); }
 
-  requireGuest();
+  // requireGuest redirects (asynchronously via location.href) if a token
+  // is already in localStorage. Returning early prevents the brief flash
+  // of the login UI when navigating from the freshly-registered step 4.
+  if (!requireGuest()) return;
+
   getDeviceId().catch(() => {});
+
+  // Re-translate visible alerts/field errors on language change.
+  onLangChange(() => applyTranslations());
 
   // ── Saved state ───────────────────────────────────────────────
   const savedToken   = localStorage.getItem('rems_token');
   const savedContact = localStorage.getItem('rems_contact') || '';
 
-  // Show PIN step if a returning user on this device has a cached token
+  // Returning user on the same device with a valid cached token: show
+  // the PIN-only fast-path. This branch is kept defensively — requireGuest
+  // would normally already have redirected to /dashboard.
   if (savedToken) {
-    q('#step-password')?.classList.add('hidden');   // safe optional chaining
+    q('#step-password')?.classList.add('hidden');
     q('#step-pin')?.classList.remove('hidden');
   }
 
   // ── Password visibility toggle ────────────────────────────────
   q('#toggle-pw')?.addEventListener('click', () => {
-    const pw   = q('#password');
+    const pw = q('#password');
     if (!pw) return;
     const show = pw.type === 'password';
     pw.type = show ? 'text' : 'password';
@@ -76,31 +220,114 @@ function hideAlert(id) { document.getElementById(id)?.classList.remove('show'); 
   });
 
   // ─────────────────────────────────────────────────────────────
-  // STEP 1 — PASSWORD LOGIN
-  // Listen on both the form submit AND the button click so that
-  // pressing Enter and clicking the button both work.
+  // STEP: PASSWORD + PIN LOGIN
+  //
+  // Both fields are required. The inline PIN inputs (.login-pin-input)
+  // live in the same form as contact+password — pressing Enter or
+  // clicking «Войти» submits everything together.
   // ─────────────────────────────────────────────────────────────
+  const loginPinInputs = document.querySelectorAll('.login-pin-input');
+  wireDigitBoxes(loginPinInputs, {
+    // Auto-submit the form when all 6 PIN digits are entered AND password
+    // is non-empty. Otherwise just stop at the last input.
+    onSubmit: () => {
+      const password = q('#password')?.value ?? '';
+      const contact  = q('#contact')?.value?.trim() ?? '';
+      if (contact && password) q('#btn-password')?.click();
+    },
+  });
+
+  // Visual gray-out until contact + password + 6-digit PIN are present.
+  // Click still passes through to handleLogin (which paints field errors).
+  wireFormGuard({
+    button:   '#btn-password',
+    required: [
+      { sel: '#contact',  kind: 'text' },
+      { sel: '#password', kind: 'text' },
+      { sel: '.login-pin-input', kind: 'digit-group', total: 6 },
+    ],
+  });
+
   async function handleLogin(e) {
     if (e?.preventDefault) e.preventDefault();
     clearErrors();
 
     const contact  = q('#contact')?.value.trim()  ?? '';
     const password = q('#password')?.value         ?? '';
+    const pin      = joinDigits(loginPinInputs);
     let valid = true;
 
-    if (!contact)  { showFieldError('err-contact',  t('errors.required')); valid = false; }
-    if (!password) { showFieldError('err-password', t('errors.required')); valid = false; }
+    if (!contact)  { showFieldError('err-contact',  'errors.required'); valid = false; }
+    if (!password) { showFieldError('err-password', 'errors.required'); valid = false; }
+    if (!pin) {
+      showFieldError('err-login-pin', 'errors.required');
+      valid = false;
+    } else if (pin.length !== 6) {
+      showFieldError('err-login-pin', 'errors.pin_length');
+      valid = false;
+    }
     if (!valid) return;
 
     const btn = q('#btn-password');
     setLoading(btn, true);
     try {
-      const data = await auth.login(contact, password);
+      const data = await auth.login(contact, password, pin);
       localStorage.setItem('rems_token',   data.data.token);
       localStorage.setItem('rems_contact', contact);
       window.location.href = '/pages/dashboard.html';
     } catch (err) {
-      showAlert('err-login', 'err-login-text', errorMessage(err));
+      const params = err?.data?.error_params || {};
+      const key    = err?.error_key;
+
+      // Lockout: render a live M:SS countdown until retry_after expires.
+      if (key === 'errors.auth.account_locked') {
+        showAlertWithParams('err-login', 'err-login-text',
+          'errors.auth.account_locked_with_timer',
+          { retry_after: Number(params.retry_after) || 0 });
+        return;
+      }
+      // Invalid credentials: show remaining attempts inline.
+      if (key === 'errors.auth.invalid_credentials') {
+        if (typeof params.attempts_remaining === 'number') {
+          showAlertWithParams('err-login', 'err-login-text',
+            'errors.auth.invalid_credentials_with_attempts',
+            { n: params.attempts_remaining });
+        } else {
+          showAlertFromError('err-login', 'err-login-text', err);
+        }
+        return;
+      }
+
+      if (key === 'errors.auth.pin_locked') {
+        loginPinInputs.forEach(i => { i.classList.add('error'); i.value = ''; i.classList.remove('filled'); });
+        showAlertWithParams('err-login', 'err-login-text',
+          'errors.auth.pin_locked_with_timer',
+          { retry_after: Number(params.retry_after) || 0 });
+        loginPinInputs[0]?.focus();
+        return;
+      }
+      if (key === 'errors.auth.pin_invalid' && typeof params.attempts_remaining === 'number') {
+        loginPinInputs.forEach(i => { i.classList.add('error'); i.value = ''; i.classList.remove('filled'); });
+        showAlertWithParams('err-login', 'err-login-text',
+          'errors.auth.pin_invalid_with_attempts',
+          { n: params.attempts_remaining });
+        loginPinInputs[0]?.focus();
+        return;
+      }
+      if (key === 'errors.auth.pin_invalid' ||
+          key === 'errors.auth.pin_required' ||
+          key === 'errors.auth.pin_not_set') {
+        // Highlight PIN row in red and reset values for re-entry
+        loginPinInputs.forEach(i => {
+          i.classList.add('error');
+          i.value = '';
+          i.classList.remove('filled');
+        });
+        showFieldError('err-login-pin', key);
+        loginPinInputs[0]?.focus();
+        return;
+      }
+      showAlertFromError('err-login', 'err-login-text', err);
     } finally {
       setLoading(btn, false);
     }
@@ -112,10 +339,24 @@ function hideAlert(id) { document.getElementById(id)?.classList.remove('show'); 
   q('#btn-password')?.addEventListener('click',  handleLogin);
 
   // ─────────────────────────────────────────────────────────────
-  // STEP 2 — PIN LOGIN
+  // STEP: PIN-ONLY FAST PATH (#step-pin)
+  // Activated only when a valid token already exists for this device.
   // ─────────────────────────────────────────────────────────────
+  const fastPinInputs = document.querySelectorAll('#step-pin .pin-input');
+  wireDigitBoxes(fastPinInputs, {
+    onSubmit: () => q('#btn-pin')?.click(),
+  });
+
+  // Fast-PIN button: gray until all 6 digits filled.
+  wireFormGuard({
+    button:   '#btn-pin',
+    required: [
+      { sel: '#step-pin .pin-input', kind: 'digit-group', total: 6 },
+    ],
+  });
+
   q('#btn-pin')?.addEventListener('click', async () => {
-    const pin = getPinValue();
+    const pin = joinDigits(fastPinInputs);
     if (pin.length < 6) return;
 
     hideAlert('err-pin');
@@ -128,57 +369,35 @@ function hideAlert(id) { document.getElementById(id)?.classList.remove('show'); 
       localStorage.setItem('rems_token', data.data.token);
       window.location.href = '/pages/dashboard.html';
     } catch (err) {
-      showAlert('err-pin', 'err-pin-text', errorMessage(err));
-      document.querySelectorAll('.pin-input').forEach(i => {
+      const params = err?.data?.error_params || {};
+      const key    = err?.error_key;
+      if (key === 'errors.auth.pin_locked') {
+        showAlertWithParams('err-pin', 'err-pin-text',
+          'errors.auth.pin_locked_with_timer',
+          { retry_after: Number(params.retry_after) || 0 });
+      } else if (key === 'errors.auth.pin_invalid' && typeof params.attempts_remaining === 'number') {
+        showAlertWithParams('err-pin', 'err-pin-text',
+          'errors.auth.pin_invalid_with_attempts',
+          { n: params.attempts_remaining });
+      } else if (key === 'errors.auth.account_locked') {
+        showAlertWithParams('err-pin', 'err-pin-text',
+          'errors.auth.account_locked_with_timer',
+          { retry_after: Number(params.retry_after) || 0 });
+      } else {
+        showAlertFromError('err-pin', 'err-pin-text', err);
+      }
+      fastPinInputs.forEach(i => {
         i.value = '';
         i.classList.remove('filled');
       });
-      document.querySelector('.pin-input')?.focus();
+      fastPinInputs[0]?.focus();
       if (btn) btn.disabled = true;
     } finally {
       setLoading(btn, false);
     }
   });
 
-  // ── PIN inputs ────────────────────────────────────────────────
-  document.querySelectorAll('.pin-input').forEach((input, idx, all) => {
-    input.addEventListener('input', () => {
-      input.value = input.value.replace(/\D/, '').slice(0, 1);
-      input.classList.toggle('filled', !!input.value);
-      if (input.value && idx < all.length - 1) all[idx + 1].focus();
-      const full = getPinValue().length === 6;
-      const btnPin = q('#btn-pin');
-      if (btnPin) btnPin.disabled = !full;
-      if (full) btnPin?.click();
-    });
-
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Backspace' && !input.value && idx > 0) {
-        all[idx - 1].focus();
-        all[idx - 1].value = '';
-        all[idx - 1].classList.remove('filled');
-        const btnPin = q('#btn-pin');
-        if (btnPin) btnPin.disabled = true;
-      }
-    });
-
-    input.addEventListener('paste', (e) => {
-      const pasted = (e.clipboardData || window.clipboardData)
-        .getData('text').replace(/\D/g, '').slice(0, 6);
-      if (!pasted) return;
-      e.preventDefault();
-      [...pasted].forEach((ch, i) => {
-        if (all[i]) { all[i].value = ch; all[i].classList.add('filled'); }
-      });
-      all[Math.min(pasted.length, all.length) - 1]?.focus();
-      const full = getPinValue().length === 6;
-      const btnPin = q('#btn-pin');
-      if (btnPin) btnPin.disabled = !full;
-      if (full) btnPin?.click();
-    });
-  });
-
-  // ── Back to password ─────────────────────────────────────────
+  // ── Back to password (from step-pin → step-password) ──────────
   q('#back-to-password')?.addEventListener('click', () => {
     localStorage.removeItem('rems_token');
     q('#step-pin')?.classList.add('hidden');

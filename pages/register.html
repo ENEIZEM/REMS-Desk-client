@@ -129,6 +129,39 @@
         <div class="form-error" id="err-org-name"><i class="ph ph-warning-circle"></i><span></span></div>
       </div>
 
+      <!-- Org occupation (owner only) — choose customer vs contractor.
+           Same UI pattern as the role-grid above. -->
+      <div class="form-group" id="org-occupation-group" style="display:none;">
+        <p class="form-label">
+          <span data-i18n="auth.register.org_occupation_label">Тип организации</span>
+          <span class="req">*</span>
+        </p>
+        <div class="role-grid" id="occupation-grid" role="radiogroup" style="grid-template-columns: 1fr 1fr;">
+          <label class="role-card" data-occupation="customer">
+            <input type="radio" name="occupation" value="customer" class="sr-only" checked>
+            <div class="role-card-icon"><i class="ph ph-storefront"></i></div>
+            <div class="role-card-label" data-i18n="profile.org_type_customer">Заказчик</div>
+            <div class="role-card-desc"  data-i18n="auth.register.org_occupation_customer_desc">Подаёте и контролируете заявки на ремонт</div>
+          </label>
+          <label class="role-card" data-occupation="contractor">
+            <input type="radio" name="occupation" value="contractor" class="sr-only">
+            <div class="role-card-icon"><i class="ph ph-wrench"></i></div>
+            <div class="role-card-label" data-i18n="profile.org_type_contractor">Подрядчик</div>
+            <div class="role-card-desc"  data-i18n="auth.register.org_occupation_contractor_desc">Принимаете заявки от клиентов и закрываете их</div>
+          </label>
+        </div>
+        <div class="form-error" id="err-occupation"><i class="ph ph-warning-circle"></i><span></span></div>
+        <!-- Reassurance: org type only affects EXTERNAL workflows (contracts
+             with other organisations). The internal request flow inside your
+             own company is identical for both customer and contractor orgs. -->
+        <div class="alert alert-info show" style="display:flex; align-items:flex-start; gap:.6rem; margin-top:.75rem;">
+          <i class="ph ph-info" style="margin-top:.15rem; flex-shrink:0;"></i>
+          <span data-i18n="auth.register.occupation_internal_note">
+            Какой бы тип вы ни выбрали, внутри вашей организации сотрудники всегда смогут создавать и закрывать заявки между собой. Тип влияет только на работу с внешними партнёрами.
+          </span>
+        </div>
+      </div>
+
       <!-- Org ID (non-owner) -->
       <div class="form-group" id="org-id-group" style="display:none;">
         <label class="form-label" for="org-id">
@@ -293,13 +326,13 @@
         <div class="form-error" id="err-reg-password2"><i class="ph ph-warning-circle"></i><span></span></div>
       </div>
 
-      <!-- PIN (optional) -->
+      <!-- PIN (required) -->
       <div class="form-group">
         <p class="form-label">
           <span data-i18n="auth.register.pin_label">PIN-код (6 цифр)</span>
-          <span style="font-size:var(--text-xs); color:var(--clr-text-muted); font-weight:400;" data-i18n="auth.register.pin_optional">Необязательно</span>
+          <span class="req">*</span>
         </p>
-        <p class="form-hint" style="margin-bottom:.5rem;" data-i18n="auth.register.pin_hint">Для быстрого входа с этого устройства</p>
+        <p class="form-hint" style="margin-bottom:.5rem;" data-i18n="auth.register.pin_hint">Понадобится для входа на новых устройствах и для быстрого входа после обновления страницы</p>
         <div class="pin-row" id="reg-pin-inputs">
           <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
           <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
@@ -336,7 +369,10 @@
     <p class="auth-subtitle" data-i18n="auth.register.success_subtitle" style="margin-bottom:2rem;">
       Ваша учётная запись создана. Войдите в систему.
     </p>
-    <a href="/pages/login.html" class="btn btn-primary btn-lg w-full">
+    <!-- Registration creates a session on the backend and api.js auto-stores
+         the returned token, so the user is already authenticated. Going
+         straight to the dashboard avoids the brief login.html flash. -->
+    <a href="/pages/dashboard.html" class="btn btn-primary btn-lg w-full">
       <i class="ph ph-sign-in"></i>
       <span data-i18n="auth.register.success_btn">Войти в систему</span>
     </a>

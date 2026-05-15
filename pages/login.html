@@ -72,6 +72,23 @@
           <div class="form-error" id="err-password"><i class="ph ph-warning-circle"></i><span></span></div>
         </div>
 
+        <!-- PIN code (always required at login — every registered user has one) -->
+        <div class="form-group">
+          <p class="form-label">
+            <span data-i18n="auth.login.pin_label">PIN-код (6 цифр)</span>
+            <span class="req">*</span>
+          </p>
+          <div class="pin-row" id="login-pin-inputs">
+            <input class="pin-input login-pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input login-pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input login-pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input login-pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input login-pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input login-pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+          </div>
+          <div class="form-error" id="err-login-pin"><i class="ph ph-warning-circle"></i><span></span></div>
+        </div>
+
         <div class="alert alert-error" id="err-login" role="alert">
           <i class="ph ph-warning-circle"></i>
           <span id="err-login-text"></span>

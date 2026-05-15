@@ -88,14 +88,16 @@ function detectContactType(contact) {
 export const auth = {
   /**
    * Request a verification code.
-   * Backend contract: POST /api/auth/code { target, type, purpose }.
-   * For registration, purpose defaults to 'register' (the only one currently
-   * routed through this public endpoint).
+   * Backend contract: POST /api/auth/code { target, type, purpose, organization_id? }.
+   * organization_id is sent only on registration into an existing organisation —
+   * backend performs eager validity / capacity checks BEFORE issuing the code,
+   * so the frontend never advances past step 1 with an invalid org_id.
    */
-  sendCode: (contact, purpose = 'register') => request('POST', '/auth/code', {
+  sendCode: (contact, purpose = 'register', organizationId = null) => request('POST', '/auth/code', {
     target:  contact,
     type:    detectContactType(contact),
     purpose,
+    ...(organizationId != null && { organization_id: organizationId }),
   }),
 
   /** Verify a code. Backend: POST /api/auth/verify { target, code, purpose }. */
@@ -114,7 +116,8 @@ export const auth = {
   }),
   logout:       ()                  => request('POST', '/auth/logout',        {}),
   acceptInvite: (token, payload)    => request('POST', '/auth/accept-invite', { token, ...payload }),
-  setPin:       (pin)               => request('POST', '/auth/set-pin',       { pin }),
+  /** Set or change PIN. payload: { pin, pin_confirm, current_pin? } */
+  setPin:       (payload)           => request('POST', '/auth/set-pin',       payload),
   verifyPin:    (pin)               => request('POST', '/auth/verify-pin',    { pin }),
 };
 
@@ -128,7 +131,10 @@ export const auth = {
 // POST /api/profile/avatar/confirm
 // ─────────────────────────────────────────────────────────────────
 export const profile = {
-  get: () => request('GET', '/profile/me'),
+  get:      () => request('GET',   '/profile/me'),
+  /** payload: { full_name?, department?, language_code? } */
+  update:   (payload) => request('PATCH', '/profile/me', payload),
+  sessions: () => request('GET',   '/profile/sessions'),
 
   /** payload: { old_password, new_password, new_password_confirm, verification_code, verification_target } */
   changePassword: (payload) => request('POST', '/profile/change-password', payload),
@@ -138,6 +144,14 @@ export const profile = {
 
   /** payload: { new_phone, verification_code, verification_target } */
   changePhone: (payload) => request('POST', '/profile/change-phone', payload),
+
+  /**
+   * Detach (open up) email or phone. The backend supports two proof paths
+   * via the optional fields below:
+   *   payload: { target_type, verification_code, verification_target } — code path
+   *   payload: { target_type, password, current_email, current_phone }  — password fallback
+   */
+  detachContact: (payload) => request('POST', '/profile/detach-contact', payload),
 
   /** payload: { target, type: 'email'|'phone', purpose: 'change_password'|'change_email'|'change_phone' } */
   sendCode: (payload) => request('POST', '/profile/send-code', payload),
@@ -165,6 +179,10 @@ export const org = {
 
   /** payload: { organization_name } */
   updateSettings: (payload) => request('PATCH', '/orgs/profile/settings', payload),
+
+  /** payload: { internal_sla_critical_h?, internal_sla_high_h?, internal_sla_medium_h?, internal_sla_low_h? }
+   *  Permission: owner or manager. */
+  updateLimits:   (payload) => request('PATCH', '/orgs/profile/limits', payload),
 
   /** Confirm a temp upload as the org logo. */
   confirmLogo: (mediaFileId) => request('POST', '/orgs/profile/logo/confirm', { media_file_id: mediaFileId }),

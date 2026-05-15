@@ -8,7 +8,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/bold/style.css">
   <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/duotone/style.css">
   <link rel="stylesheet" href="../style.css">
 </head>
 <body>
@@ -48,18 +50,36 @@
         <span id="nav-avatar-initials">?</span>
         <img id="nav-avatar-img" src="" alt="" style="display:none;">
       </button>
-      <div id="user-dropdown" class="hidden" style="position:absolute; top:calc(100% + .5rem); right:0; background:var(--clr-surface); border:1px solid var(--clr-border); border-radius:var(--radius-lg); box-shadow:var(--shadow-lg); min-width:180px; z-index:60; overflow:hidden;">
-        <div style="padding:.75rem 1rem; border-bottom:1px solid var(--clr-border);">
-          <div style="font-size:var(--text-sm); font-weight:600;" id="dd-name">—</div>
-          <div style="font-size:var(--text-xs); color:var(--clr-text-muted);" id="dd-email">—</div>
+      <div id="user-dropdown" class="hidden" style="position:absolute; top:calc(100% + .5rem); right:0; background:var(--clr-surface); border:1px solid var(--clr-border); border-radius:var(--radius-lg); box-shadow:var(--shadow-lg); min-width:260px; z-index:60; overflow:hidden;">
+        <!-- ── User header: full name + masked contact ─────────── -->
+        <div style="padding:.85rem 1rem; border-bottom:1px solid var(--clr-border);">
+          <div id="dd-name"
+               style="font-size:var(--text-sm); font-weight:700; color:var(--clr-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+            —
+          </div>
+          <div id="dd-email"
+               style="font-size:var(--text-xs); color:var(--clr-text-muted); margin-top:.15rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+            —
+          </div>
         </div>
+
+        <!-- ── Org row: clickable → #org tab. Shows role badge if
+                user is an approved member, otherwise membership status. -->
+        <button id="dd-org-link" class="nav-item"
+                style="border-radius:0; border:none; align-items:flex-start; gap:.65rem; padding:.7rem 1rem; width:100%; text-align:left;">
+          <i class="ph ph-buildings" style="margin-top:.15rem;"></i>
+          <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:.25rem;">
+            <span id="dd-org"
+                  style="font-size:var(--text-sm); font-weight:600; color:var(--clr-navy); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+              —
+            </span>
+            <span id="dd-pill" class="badge badge-default" style="font-size:var(--text-xs); align-self:flex-start;">—</span>
+          </div>
+        </button>
+
         <button class="nav-item" id="dd-profile" style="border-radius:0; border:none;">
           <i class="ph ph-user"></i>
           <span data-i18n="nav.profile">Профиль</span>
-        </button>
-        <button class="nav-item" id="dd-settings" style="border-radius:0; border:none;">
-          <i class="ph ph-gear"></i>
-          <span data-i18n="nav.settings">Настройки</span>
         </button>
         <div style="border-top:1px solid var(--clr-border); padding:.25rem;">
           <button class="nav-item" id="btn-logout" style="border-radius:var(--radius-sm); color:var(--clr-error);">
@@ -100,14 +120,14 @@
       </div>
 
       <div class="nav-section" id="org-nav-section" style="display:none;">
-        <p class="nav-section-label">Организация</p>
-        <button class="nav-item" data-tab="members">
+        <p class="nav-section-label" data-i18n="nav.organization_section">Организация</p>
+        <button class="nav-item" data-tab="members" id="nav-item-members">
           <i class="ph ph-users"></i>
           <span data-i18n="nav.members">Сотрудники</span>
         </button>
-        <button class="nav-item" data-tab="org">
+        <button class="nav-item" data-tab="org" id="nav-item-org" style="display:none;">
           <i class="ph ph-buildings"></i>
-          <span>Профиль орг.</span>
+          <span data-i18n="nav.your_organization">Ваша организация</span>
         </button>
       </div>
 
@@ -288,149 +308,407 @@
       </div>
     </div>
 
-    <!-- ══ TAB: Org ════════════════════════════════════════════ -->
+    <!-- ══ TAB: Your Organization ═══════════════════════════════════════════
+         Header strip carries the heavy ID context (name + ID + occupation
+         + active + role + members chip) so the two columns underneath
+         show only THE FACTS, with equal row counts on both sides. -->
     <div class="tab-panel" id="tab-org">
       <div class="page-header">
-        <h1 class="page-title">Профиль организации</h1>
+        <h1 class="page-title" data-i18n="nav.your_organization">Ваша организация</h1>
       </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem;">
 
-        <div class="card">
-          <div class="card-header">
-            <h2 class="card-title">Информация</h2>
-            <button class="btn btn-secondary btn-sm" id="btn-edit-org">
-              <i class="ph ph-pencil"></i>
-              <span data-i18n="common.edit">Редактировать</span>
-            </button>
+      <!-- ─── Header strip ─────────────────────────────────────────────── -->
+      <div class="card profile-identity-card">
+        <label class="profile-org-logo" id="org-logo-wrap">
+          <div class="avatar avatar-xxl" id="org-logo-avatar">
+            <span id="org-logo-initials">?</span>
+            <img id="org-logo-img" src="" alt="" style="display:none;">
           </div>
-          <div>
-            <div class="profile-row">
-              <span class="profile-row-label">Название</span>
-              <span class="profile-row-value" id="org-name-val">—</span>
-            </div>
-            <div class="profile-row">
-              <span class="profile-row-label">ID организации</span>
-              <span class="profile-row-value" id="org-id-val">—</span>
-            </div>
-            <div class="profile-row">
-              <span class="profile-row-label">Тип</span>
-              <span class="profile-row-value" id="org-type-val">—</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Org logo -->
-        <div class="card" style="display:flex; flex-direction:column; align-items:center; gap:1rem;">
-          <label class="avatar-upload">
-            <div class="avatar avatar-xl" id="org-logo-avatar">
-              <i class="ph ph-buildings" style="font-size:2rem;"></i>
-            </div>
-            <div class="avatar-upload-overlay"><i class="ph ph-camera"></i></div>
-            <input type="file" id="org-logo-input" accept="image/*" style="display:none;">
-          </label>
-          <div style="text-align:center;">
-            <p style="font-size:var(--text-sm); font-weight:600;" id="org-name-display">—</p>
-            <p style="font-size:var(--text-xs); color:var(--clr-text-muted);">Логотип организации</p>
+          <div class="avatar-upload-overlay" id="org-logo-overlay" style="display:none;"><i class="ph ph-camera"></i></div>
+          <input type="file" id="org-logo-input" accept="image/*" style="display:none;">
+        </label>
+        <div class="profile-identity-info">
+          <h2 class="profile-identity-name">
+            <span id="org-head-name">—</span>
+            <button class="profile-row-edit-btn" data-edit-field="organization_name" aria-label="edit" style="margin-left:.4rem; vertical-align:middle;"><i class="ph-duotone ph-pencil-simple"></i></button>
+          </h2>
+          <p class="profile-identity-meta">
+            <span style="color:var(--clr-text-muted);" data-i18n="profile.organization_id">ID</span>:
+            <span id="org-head-id" style="font-weight:600;">—</span>
+            ·
+            <span data-i18n="profile.plan">Тариф</span>:
+            <span id="org-head-plan" style="font-weight:700; color:var(--clr-accent);">—</span>
+          </p>
+          <div class="profile-identity-badges">
+            <span id="org-head-type"   class="badge badge-default">—</span>
+            <span id="org-head-active" class="badge badge-default">—</span>
+            <span id="org-head-myrole" class="badge badge-default">—</span>
           </div>
         </div>
+      </div>
 
+      <!-- ─── Two-column grid: equal row counts (4+4 left, 3+5 right) ─── -->
+      <div class="profile-two-col">
+
+        <!-- ═══ LEFT ═════════════════════════════════════════════════════ -->
+        <div class="profile-col">
+
+          <!-- About the organization — 4 rows -->
+          <div class="card profile-card">
+            <div class="profile-card-header">
+              <div class="profile-card-icon navy"><i class="ph-bold ph-buildings"></i></div>
+              <h3 class="profile-card-title" data-i18n="profile.about_org">Об организации</h3>
+              <span class="profile-card-tooltip" tabindex="0" data-tooltip-key="profile.tip_about_org">
+                <i class="ph ph-info"></i>
+              </span>
+            </div>
+            <div class="profile-card-body">
+              <div class="profile-row">
+                <span class="profile-row-label" data-i18n="profile.org_type">Тип</span>
+                <!-- Read-only: org type is locked after creation. -->
+                <span class="profile-row-value" id="org-info-type">—</span>
+              </div>
+              <div class="profile-row">
+                <span class="profile-row-label" data-i18n="profile.org_status">Статус</span>
+                <span class="profile-row-value" id="org-info-status">—</span>
+              </div>
+              <!-- Swapped: «Ваша роль» now precedes «Дата создания» so the
+                   role tooltip can flow downward without being clipped by
+                   the next card. -->
+              <div class="profile-row">
+                <span class="profile-row-label" data-i18n="profile.role_in_org">Ваша роль в организации</span>
+                <span class="profile-row-edit-wrap">
+                  <span class="profile-row-value" id="org-info-myrole">—</span>
+                  <!-- Tooltip is shown/hidden by JS based on the user's role -->
+                  <span class="profile-card-tooltip hidden" id="org-info-role-tooltip" tabindex="0" style="margin-left:.25rem;">
+                    <i class="ph ph-info"></i>
+                  </span>
+                </span>
+              </div>
+              <div class="profile-row" style="border-bottom:none;">
+                <span class="profile-row-label" data-i18n="profile.org_created_at">Дата создания</span>
+                <span class="profile-row-value" id="org-info-created">—</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Internal SLA — 4 rows; hint lives in the header tooltip (no
+               extra row inside the body) so heights line up with the right column. -->
+          <div class="card profile-card">
+            <div class="profile-card-header">
+              <div class="profile-card-icon navy"><i class="ph-bold ph-clock-countdown"></i></div>
+              <h3 class="profile-card-title" data-i18n="profile.internal_sla">Внутренние SLA</h3>
+              <span class="profile-card-tooltip" tabindex="0" data-tooltip-key="profile.internal_sla_hint">
+                <i class="ph ph-info"></i>
+              </span>
+            </div>
+            <div class="profile-card-body">
+              <div class="profile-row sla-row-wide">
+                <span class="profile-row-label">
+                  <span class="sla-pri sla-critical" data-i18n="profile.sla_critical">Критический</span>
+                </span>
+                <span class="profile-row-edit-wrap">
+                  <span class="sla-val" id="sla-crit">—</span>
+                  <button class="profile-row-edit-btn" data-edit-field="internal_sla_critical_h" aria-label="edit"><i class="ph-duotone ph-pencil-simple"></i></button>
+                </span>
+              </div>
+              <div class="profile-row sla-row-wide">
+                <span class="profile-row-label">
+                  <span class="sla-pri sla-high" data-i18n="profile.sla_high">Высокий</span>
+                </span>
+                <span class="profile-row-edit-wrap">
+                  <span class="sla-val" id="sla-high">—</span>
+                  <button class="profile-row-edit-btn" data-edit-field="internal_sla_high_h" aria-label="edit"><i class="ph-duotone ph-pencil-simple"></i></button>
+                </span>
+              </div>
+              <div class="profile-row sla-row-wide">
+                <span class="profile-row-label">
+                  <span class="sla-pri sla-medium" data-i18n="profile.sla_medium">Средний</span>
+                </span>
+                <span class="profile-row-edit-wrap">
+                  <span class="sla-val" id="sla-med">—</span>
+                  <button class="profile-row-edit-btn" data-edit-field="internal_sla_medium_h" aria-label="edit"><i class="ph-duotone ph-pencil-simple"></i></button>
+                </span>
+              </div>
+              <div class="profile-row sla-row-wide" style="border-bottom:none;">
+                <span class="profile-row-label">
+                  <span class="sla-pri sla-low" data-i18n="profile.sla_low">Низкий</span>
+                </span>
+                <span class="profile-row-edit-wrap">
+                  <span class="sla-val" id="sla-low">—</span>
+                  <button class="profile-row-edit-btn" data-edit-field="internal_sla_low_h" aria-label="edit"><i class="ph-duotone ph-pencil-simple"></i></button>
+                </span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ═══ RIGHT ═══════════════════════════════════════════════════ -->
+        <div class="profile-col">
+
+          <!-- Subscription — 3 rows (kept as a separate card with gold crown) -->
+          <div class="card profile-card">
+            <div class="profile-card-header">
+              <div class="profile-card-icon gold"><i class="ph-bold ph-chart-line-up"></i></div>
+              <h3 class="profile-card-title" data-i18n="profile.subscription">Подписка</h3>
+              <span class="profile-card-tooltip" tabindex="0" data-tooltip-key="profile.subscription_tip">
+                <i class="ph ph-info"></i>
+              </span>
+            </div>
+            <div class="profile-card-body">
+              <div class="profile-row">
+                <span class="profile-row-label-stack">
+                  <span class="profile-row-label">
+                    <span data-i18n="profile.plan">Тариф</span>:
+                    <span id="sub-plan-line" style="font-weight:700; color:var(--clr-accent); margin-left:.35rem;">Free</span>
+                  </span>
+                </span>
+                <button class="btn btn-upgrade-gold" id="btn-upgrade-sub" data-tooltip-key="profile.upgrade_coming_soon">
+                  <i class="ph-bold ph-crown-simple"></i>
+                  <span data-i18n="profile.upgrade">Улучшить</span>
+                </button>
+              </div>
+              <div class="profile-row">
+                <span class="profile-row-label" data-i18n="profile.max_employees">Сотрудников</span>
+                <span class="profile-row-value" id="sub-employee-usage">—</span>
+              </div>
+              <div class="profile-row" style="border-bottom:none;">
+                <span class="profile-row-label" data-i18n="profile.active_requests">Активных заявок</span>
+                <span class="profile-row-value" id="sub-active-req-usage">—</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Limits — 5 rows: each file-type row has Разрешено/Запрещено
+               pill on the right + secondary detail line below the label. -->
+          <div class="card profile-card">
+            <div class="profile-card-header">
+              <div class="profile-card-icon teal"><i class="ph-bold ph-gauge"></i></div>
+              <h3 class="profile-card-title" data-i18n="profile.limits">Лимиты организации</h3>
+              <span class="profile-card-tooltip" tabindex="0" data-tooltip-key="profile.tip_limits">
+                <i class="ph ph-info"></i>
+              </span>
+            </div>
+            <div class="profile-card-body">
+              <div class="profile-row">
+                <span class="profile-row-label-stack">
+                  <span class="profile-row-label" data-i18n="profile.images">Изображения</span>
+                  <span class="profile-row-sub" id="lim-images-sub">—</span>
+                </span>
+                <span id="lim-images-flag" class="badge feature-pill">—</span>
+              </div>
+              <div class="profile-row">
+                <span class="profile-row-label-stack">
+                  <span class="profile-row-label" data-i18n="profile.videos">Видео</span>
+                  <span class="profile-row-sub" id="lim-videos-sub">—</span>
+                </span>
+                <span id="lim-videos-flag" class="badge feature-pill">—</span>
+              </div>
+              <div class="profile-row">
+                <span class="profile-row-label-stack">
+                  <span class="profile-row-label" data-i18n="profile.documents">Документы</span>
+                  <span class="profile-row-sub" id="lim-docs-sub">—</span>
+                </span>
+                <span id="lim-docs-flag" class="badge feature-pill">—</span>
+              </div>
+              <div class="profile-row">
+                <span class="profile-row-label" data-i18n="profile.analytics_detailed">Детальная аналитика</span>
+                <span id="lim-analytics-flag" class="badge feature-pill">—</span>
+              </div>
+              <div class="profile-row" style="border-bottom:none;">
+                <span class="profile-row-label" data-i18n="profile.analytics_export">Экспорт аналитики</span>
+                <span id="lim-export-flag" class="badge feature-pill">—</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
       </div>
     </div>
 
-    <!-- ══ TAB: Profile ════════════════════════════════════════ -->
+    <!-- ══ TAB: Personal Profile ════════════════════════════════════════════
+         Header strip (avatar + identity) + 2 equal-row cards.
+         All field edits open a generic #field-edit-modal so the cards stay
+         visually identical in read mode. -->
     <div class="tab-panel" id="tab-profile">
       <div class="page-header">
         <h1 class="page-title" data-i18n="profile.title">Профиль</h1>
-        <p class="page-desc">Управление личными данными</p>
       </div>
 
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem;">
-
-        <!-- Avatar card -->
-        <div class="card" style="display:flex; flex-direction:column; align-items:center; gap:1rem; grid-row:span 2;">
-          <label class="avatar-upload">
-            <div class="avatar avatar-xl" id="profile-avatar">
-              <span id="profile-initials">?</span>
-              <img id="profile-avatar-img" src="" alt="" style="display:none;">
-            </div>
-            <div class="avatar-upload-overlay"><i class="ph ph-camera"></i></div>
-            <input type="file" id="avatar-input" accept="image/*" style="display:none;">
-          </label>
-          <div style="text-align:center;">
-            <p style="font-size:var(--text-lg); font-weight:600;" id="profile-fullname">—</p>
-            <p style="font-size:var(--text-sm); color:var(--clr-text-muted);" id="profile-role-badge">—</p>
+      <!-- ─── Header strip ────────────────────────────────────────────────── -->
+      <div class="card profile-identity-card">
+        <label class="avatar-upload">
+          <div class="avatar avatar-xxl" id="profile-avatar">
+            <span id="profile-initials">?</span>
+            <img id="profile-avatar-img" src="" alt="" style="display:none;">
           </div>
-          <button class="btn btn-secondary btn-sm w-full" id="btn-change-avatar" style="max-width:200px;" data-i18n="profile.change_avatar">
-            Изменить фото
-          </button>
-        </div>
-
-        <!-- Info card -->
-        <div class="card">
-          <div class="card-header">
-            <h2 class="card-title" data-i18n="profile.title">Информация</h2>
-          </div>
-          <div>
-            <div class="profile-row">
-              <span class="profile-row-label" data-i18n="profile.name">Полное имя</span>
-              <span class="profile-row-value" id="info-fullname">—</span>
-            </div>
-            <div class="profile-row">
-              <span class="profile-row-label" data-i18n="profile.email">Эл. почта</span>
-              <span class="profile-row-value" id="info-email">—</span>
-            </div>
-            <div class="profile-row">
-              <span class="profile-row-label" data-i18n="profile.phone">Телефон</span>
-              <span class="profile-row-value" id="info-phone">—</span>
-            </div>
-            <div class="profile-row">
-              <span class="profile-row-label" data-i18n="profile.department">Отдел</span>
-              <span class="profile-row-value" id="info-dept">—</span>
-            </div>
-            <div class="profile-row">
-              <span class="profile-row-label" data-i18n="profile.role">Роль</span>
-              <span class="profile-row-value" id="info-role">—</span>
-            </div>
-            <div class="profile-row">
-              <span class="profile-row-label" data-i18n="profile.language">Язык</span>
-              <span class="profile-row-value" id="info-lang">—</span>
-            </div>
+          <div class="avatar-upload-overlay"><i class="ph ph-camera"></i></div>
+          <input type="file" id="avatar-input" accept="image/*" style="display:none;">
+        </label>
+        <div class="profile-identity-info">
+          <h2 class="profile-identity-name" id="profile-fullname">—</h2>
+          <p class="profile-identity-meta">
+            <span style="color:var(--clr-text-muted);" data-i18n="profile.user_id">ID</span>:
+            <span id="profile-userid-inline" style="font-weight:600;">—</span>
+            ·
+            <span class="profile-masked-inline" id="profile-head-email">—</span>
+            <span class="profile-masked-inline" id="profile-head-phone"></span>
+          </p>
+          <div class="profile-identity-badges">
+            <span id="profile-role-badge"   class="badge badge-default">—</span>
+            <span id="profile-status-badge" class="badge badge-default">—</span>
           </div>
         </div>
+      </div>
 
-        <!-- Password card -->
-        <div class="card">
-          <div class="card-header">
-            <h2 class="card-title" data-i18n="profile.change_password">Изменить пароль</h2>
+      <!-- ─── Two-column grid: equal row counts (6 each) ──────────────────
+           No icons on left labels; secondary info (dates, masked contacts)
+           lives BELOW the label as a muted sub-line. Action button stays
+           on the right of every row. -->
+      <div class="profile-two-col">
+
+        <!-- ═══ LEFT: Личные данные ═══ (6 rows) -->
+        <div class="profile-col">
+          <div class="card profile-card">
+            <div class="profile-card-header">
+              <div class="profile-card-icon teal"><i class="ph-bold ph-user-circle"></i></div>
+              <h3 class="profile-card-title" data-i18n="profile.personal_info">Личные данные</h3>
+              <span class="profile-card-tooltip" tabindex="0" data-tooltip-key="profile.tip_personal_info">
+                <i class="ph ph-info"></i>
+              </span>
+            </div>
+            <div class="profile-card-body">
+              <div class="profile-row">
+                <span class="profile-row-label" data-i18n="profile.name">Полное имя</span>
+                <span class="profile-row-edit-wrap">
+                  <span class="profile-row-value" id="info-fullname">—</span>
+                  <button class="profile-row-edit-btn" data-edit-field="full_name" aria-label="edit"><i class="ph-duotone ph-pencil-simple"></i></button>
+                </span>
+              </div>
+              <div class="profile-row">
+                <span class="profile-row-label" data-i18n="profile.department">Отдел</span>
+                <span class="profile-row-edit-wrap">
+                  <span class="profile-row-value" id="info-dept">—</span>
+                  <button class="profile-row-edit-btn" data-edit-field="department" aria-label="edit"><i class="ph-duotone ph-pencil-simple"></i></button>
+                </span>
+              </div>
+              <div class="profile-row">
+                <span class="profile-row-label-stack">
+                  <span class="profile-row-label" data-i18n="profile.email">Email</span>
+                  <span class="profile-row-sub" id="info-email-sub">—</span>
+                </span>
+                <span class="profile-row-edit-wrap">
+                  <button class="btn btn-row-action" id="btn-edit-email">
+                    <i class="ph ph-envelope-simple"></i>
+                    <span id="btn-edit-email-label" data-i18n="common.change">Сменить</span>
+                  </button>
+                </span>
+              </div>
+              <div class="profile-row">
+                <span class="profile-row-label-stack">
+                  <span class="profile-row-label" data-i18n="profile.phone">Телефон</span>
+                  <span class="profile-row-sub" id="info-phone-sub">—</span>
+                </span>
+                <span class="profile-row-edit-wrap">
+                  <button class="btn btn-row-action" id="btn-edit-phone">
+                    <i class="ph ph-phone"></i>
+                    <span id="btn-edit-phone-label" data-i18n="common.change">Сменить</span>
+                  </button>
+                </span>
+              </div>
+              <div class="profile-row">
+                <span class="profile-row-label">Telegram</span>
+                <span class="profile-row-edit-wrap">
+                  <button class="btn btn-row-action btn-row-link" id="btn-link-telegram" data-tooltip-key="profile.telegram_coming_soon">
+                    <i class="ph ph-telegram-logo"></i>
+                    <span data-i18n="common.link">Привязать</span>
+                  </button>
+                </span>
+              </div>
+              <div class="profile-row" style="border-bottom:none;">
+                <span class="profile-row-label" data-i18n="profile.role_in_org">Ваша роль в организации</span>
+                <span class="profile-row-edit-wrap">
+                  <span id="info-role" class="badge badge-default">—</span>
+                  <span class="profile-card-tooltip hidden" id="info-role-tooltip" tabindex="0" style="margin-left:.25rem;">
+                    <i class="ph ph-info"></i>
+                  </span>
+                </span>
+              </div>
+            </div>
           </div>
-          <div style="display:flex; flex-direction:column; gap:.75rem;">
-            <div class="form-group">
-              <label class="form-label" for="old-password">Текущий пароль</label>
-              <div class="input-wrap">
-                <i class="ph ph-lock-simple input-icon"></i>
-                <input id="old-password" type="password" class="form-input" placeholder="Текущий пароль">
+        </div>
+
+        <!-- ═══ RIGHT: Аккаунт ═══ (6 rows) -->
+        <div class="profile-col">
+          <div class="card profile-card">
+            <div class="profile-card-header">
+              <div class="profile-card-icon navy"><i class="ph-bold ph-shield-check"></i></div>
+              <h3 class="profile-card-title" data-i18n="profile.account">Аккаунт</h3>
+              <span class="profile-card-tooltip" tabindex="0" data-tooltip-key="profile.tip_account">
+                <i class="ph ph-info"></i>
+              </span>
+            </div>
+            <div class="profile-card-body">
+              <div class="profile-row">
+                <span class="profile-row-label-stack">
+                  <span class="profile-row-label" data-i18n="profile.change_password">Пароль</span>
+                  <span class="profile-row-sub" id="info-pwd-changed">—</span>
+                </span>
+                <button class="btn btn-row-action btn-row-change" id="btn-open-change-pwd">
+                  <i class="ph ph-key"></i>
+                  <span data-i18n="common.change">Сменить</span>
+                </button>
+              </div>
+              <div class="profile-row">
+                <span class="profile-row-label-stack">
+                  <span class="profile-row-label" data-i18n="profile.change_pin">PIN-код</span>
+                  <span class="profile-row-sub" id="info-pin-set">—</span>
+                </span>
+                <button class="btn btn-row-action btn-row-change" id="btn-open-change-pin">
+                  <i class="ph ph-lock-key"></i>
+                  <span data-i18n="common.change">Сменить</span>
+                </button>
+              </div>
+              <div class="profile-row">
+                <span class="profile-row-label" data-i18n="profile.registered_at">Дата регистрации</span>
+                <span class="profile-row-value" id="info-created-at">—</span>
+              </div>
+              <div class="profile-row">
+                <span class="profile-row-label" data-i18n="profile.last_login">Последний вход</span>
+                <span class="profile-row-value" id="info-last-login">—</span>
+              </div>
+              <div class="profile-row">
+                <span class="profile-row-label" data-i18n="profile.in_org_since">В организации с</span>
+                <span class="profile-row-value" id="info-joined">—</span>
+              </div>
+              <div class="profile-row" style="border-bottom:none;">
+                <span class="profile-row-label" data-i18n="profile.sessions">Активные сессии</span>
+                <span class="profile-row-value" id="sessions-count">—</span>
               </div>
             </div>
-            <div class="form-group">
-              <label class="form-label" for="new-password">Новый пароль</label>
-              <div class="input-wrap">
-                <i class="ph ph-lock-key input-icon"></i>
-                <input id="new-password" type="password" class="form-input" placeholder="Новый пароль">
-              </div>
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="new-password2">Подтверждение</label>
-              <div class="input-wrap">
-                <i class="ph ph-lock-key input-icon"></i>
-                <input id="new-password2" type="password" class="form-input" placeholder="Повторите новый пароль">
-              </div>
-            </div>
-            <div class="alert alert-error hidden" id="err-chpw"><i class="ph ph-warning-circle"></i><span id="err-chpw-text"></span></div>
-            <button class="btn btn-primary" id="btn-change-password" data-i18n="profile.change_password">Изменить пароль</button>
           </div>
         </div>
 
       </div>
+
+      <!-- ─── Active sessions card — full-width below ─────────────────────── -->
+      <div class="card profile-card" style="margin-top:1.5rem;">
+        <div class="profile-card-header">
+          <div class="profile-card-icon navy"><i class="ph-bold ph-monitor"></i></div>
+          <h3 class="profile-card-title" data-i18n="profile.sessions">Активные сессии</h3>
+          <span class="profile-card-tooltip" tabindex="0" data-tooltip-key="profile.tip_sessions">
+            <i class="ph ph-info"></i>
+          </span>
+        </div>
+        <div id="sessions-list" class="profile-card-body">
+          <div class="empty-state" style="padding:1.5rem 0;">
+            <i class="ph ph-device-mobile"></i>
+            <p class="empty-state-text" data-i18n="profile.sessions_loading">Загрузка…</p>
+          </div>
+        </div>
+      </div>
+
     </div>
 
   </main>
@@ -479,22 +757,341 @@
 </div>
 
 <!-- ── Edit org name modal ──────────────────────────────────────── -->
-<div class="modal-backdrop" id="edit-org-modal">
+<!-- legacy edit-org-modal removed — replaced by generic #field-edit-modal -->
+
+<!-- ── Generic single-field edit modal ─────────────────────────────────
+     Driven entirely from JS (dashboard.js openFieldEditModal).
+     • title is set per-field via i18n
+     • input swaps to type=number/select if the descriptor demands it
+     • on Save, calls the descriptor's API endpoint and refreshes -->
+<div class="modal-backdrop" id="field-edit-modal">
   <div class="modal">
     <div class="modal-header">
-      <h3 class="modal-title">Изменить название организации</h3>
-      <button class="modal-close" data-close-modal="edit-org-modal"><i class="ph ph-x"></i></button>
+      <h3 class="modal-title" id="field-edit-title">—</h3>
+      <button class="modal-close" data-close-modal="field-edit-modal"><i class="ph ph-x"></i></button>
     </div>
     <div class="modal-body">
       <div class="form-group">
-        <label class="form-label" for="edit-org-name">Название <span class="req">*</span></label>
-        <input id="edit-org-name" type="text" class="form-input" placeholder="Название организации">
-        <div class="form-error" id="err-edit-org"><i class="ph ph-warning-circle"></i><span></span></div>
+        <label class="form-label" id="field-edit-label" for="field-edit-input">—</label>
+        <input id="field-edit-input"  type="text"   class="form-input"  maxlength="255">
+        <input id="field-edit-number" type="number" class="form-input"  style="display:none;">
+        <select id="field-edit-select" class="form-input" style="display:none;"></select>
+        <p class="form-hint hidden" id="field-edit-hint"></p>
+        <div class="form-error" id="field-edit-error"><i class="ph ph-warning-circle"></i><span></span></div>
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-secondary" data-close-modal="edit-org-modal" data-i18n="common.cancel">Отмена</button>
-      <button class="btn btn-primary" id="btn-save-org-name" data-i18n="common.save">Сохранить</button>
+      <button class="btn btn-secondary" data-close-modal="field-edit-modal" data-i18n="common.cancel">Отмена</button>
+      <button class="btn btn-primary"   id="btn-field-edit-save"           data-i18n="common.save">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="change-pwd-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 class="modal-title" data-i18n="profile.change_password">Изменить пароль</h3>
+      <button class="modal-close" data-close-modal="change-pwd-modal"><i class="ph ph-x"></i></button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex; flex-direction:column; gap:1rem;">
+
+        <!-- ── Step-up verification: send a code to a verified contact and
+                require the user to enter it before allowing the password
+                change. Backend wires this up via verification_code/target. -->
+        <div class="form-group" id="chp-verify-block">
+          <p class="form-hint" data-i18n="profile.change_pwd_verify_hint" style="margin-bottom:.5rem;">
+            Подтвердите личность кодом из почты или SMS.
+          </p>
+
+          <!-- Contact picker — visible only when the user has 2 verified contacts. -->
+          <div id="chp-contact-choice" style="display:none; margin-bottom:.75rem;">
+            <div style="display:flex; gap:.5rem;">
+              <label class="role-card" id="chp-contact-email-card" style="flex:1; cursor:pointer; padding:.6rem; display:flex; align-items:center; gap:.5rem;">
+                <input type="radio" name="chp-contact" value="email" style="margin:0;">
+                <i class="ph ph-envelope"></i>
+                <span id="chp-contact-email-label" style="font-size:var(--text-xs); font-weight:600;">—</span>
+              </label>
+              <label class="role-card" id="chp-contact-phone-card" style="flex:1; cursor:pointer; padding:.6rem; display:flex; align-items:center; gap:.5rem;">
+                <input type="radio" name="chp-contact" value="phone" style="margin:0;">
+                <i class="ph ph-device-mobile"></i>
+                <span id="chp-contact-phone-label" style="font-size:var(--text-xs); font-weight:600;">—</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Single-contact label (only one verified contact) -->
+          <p id="chp-contact-single" style="font-size:var(--text-xs); color:var(--clr-text-secondary); margin:0 0 .5rem;">
+            <span data-i18n="profile.change_pwd_code_target">Код будет отправлен на</span>
+            <strong id="chp-contact-single-target">—</strong>
+          </p>
+
+          <button type="button" id="btn-chp-send-code" class="btn btn-secondary btn-sm" style="margin-bottom:.5rem;">
+            <i class="ph ph-paper-plane-tilt"></i>
+            <span data-i18n="profile.change_pwd_send_code">Отправить код</span>
+          </button>
+
+          <!-- Code input row — hidden until first send -->
+          <div id="chp-code-row" class="hidden">
+            <p class="form-label" style="margin-bottom:.5rem; font-size:var(--text-xs);">
+              <span data-i18n="profile.change_pwd_enter_code">Введите 6-значный код</span>
+              <span id="chp-resend-block" style="margin-left:.5rem;">
+                <button type="button" id="btn-chp-resend" class="link-btn" style="font-size:var(--text-xs);" data-i18n="auth.register.code_resend">Отправить заново</button>
+                <span id="chp-resend-wait" class="hidden" style="font-size:var(--text-xs); color:var(--clr-text-muted);">
+                  (<span id="chp-resend-countdown">60</span>с)
+                </span>
+              </span>
+            </p>
+            <div class="pin-row" id="chp-code-inputs">
+              <input class="pin-input chp-code-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+              <input class="pin-input chp-code-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+              <input class="pin-input chp-code-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+              <input class="pin-input chp-code-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+              <input class="pin-input chp-code-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+              <input class="pin-input chp-code-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="chp-current" data-i18n="profile.current_password">Текущий пароль</label>
+          <div class="input-wrap">
+            <i class="ph ph-lock-simple input-icon"></i>
+            <input id="chp-current" type="password" class="form-input" autocomplete="current-password">
+            <button type="button" class="input-action" data-toggle-pw="chp-current" tabindex="-1">
+              <i class="ph ph-eye"></i>
+            </button>
+          </div>
+          <div class="form-error" id="err-chp-current"><i class="ph ph-warning-circle"></i><span></span></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="chp-new" data-i18n="profile.new_password">Новый пароль</label>
+          <div class="input-wrap">
+            <i class="ph ph-lock-key input-icon"></i>
+            <input id="chp-new" type="password" class="form-input" autocomplete="new-password">
+            <button type="button" class="input-action" data-toggle-pw="chp-new" tabindex="-1">
+              <i class="ph ph-eye"></i>
+            </button>
+          </div>
+          <!-- Strength meter — mirrors the registration step-3 indicator -->
+          <div id="chp-strength" style="display:none; margin-top:.5rem;">
+            <div style="display:flex; gap:.2rem; margin-bottom:.25rem;">
+              <div class="pw-bar" style="flex:1; height:4px; border-radius:2px; background:var(--clr-border); transition:background .15s;"></div>
+              <div class="pw-bar" style="flex:1; height:4px; border-radius:2px; background:var(--clr-border); transition:background .15s;"></div>
+              <div class="pw-bar" style="flex:1; height:4px; border-radius:2px; background:var(--clr-border); transition:background .15s;"></div>
+              <div class="pw-bar" style="flex:1; height:4px; border-radius:2px; background:var(--clr-border); transition:background .15s;"></div>
+            </div>
+            <p id="chp-strength-label" style="font-size:var(--text-xs); margin:0; font-weight:600;"></p>
+          </div>
+          <p class="form-hint" data-i18n="auth.register.pass_hint">Заглавная буква, строчная буква, цифра</p>
+          <div class="form-error" id="err-chp-new"><i class="ph ph-warning-circle"></i><span></span></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="chp-confirm" data-i18n="profile.confirm_password">Подтвердите новый пароль</label>
+          <div class="input-wrap">
+            <i class="ph ph-lock-key input-icon"></i>
+            <input id="chp-confirm" type="password" class="form-input" autocomplete="new-password">
+            <button type="button" class="input-action" data-toggle-pw="chp-confirm" tabindex="-1">
+              <i class="ph ph-eye"></i>
+            </button>
+          </div>
+          <div class="form-error" id="err-chp-confirm"><i class="ph ph-warning-circle"></i><span></span></div>
+        </div>
+        <div class="alert alert-error" id="err-chp"><i class="ph ph-warning-circle"></i><span id="err-chp-text"></span></div>
+
+        <!-- Visible warning: changing the password drops other sessions. -->
+        <div class="alert alert-warning show" style="display:flex; align-items:flex-start; gap:.6rem;">
+          <i class="ph ph-warning" style="margin-top:.15rem; flex-shrink:0;"></i>
+          <span data-i18n="profile.change_pwd_session_warning">
+            После смены пароля все остальные сессии (другие устройства) будут завершены. Текущий сеанс останется активным.
+          </span>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-close-modal="change-pwd-modal" data-i18n="common.cancel">Отмена</button>
+      <button class="btn btn-primary" id="btn-save-pwd" data-i18n="common.save">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Change PIN modal ──────────────────────────────────────── -->
+<div class="modal-backdrop" id="change-pin-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 class="modal-title" data-i18n="profile.change_pin">Изменить PIN-код</h3>
+      <button class="modal-close" data-close-modal="change-pin-modal"><i class="ph ph-x"></i></button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex; flex-direction:column; gap:1.25rem;">
+        <div id="chpin-current-group">
+          <p class="form-label" style="margin-bottom:.65rem;" data-i18n="profile.current_pin">Текущий PIN</p>
+          <div class="pin-row" id="chpin-current">
+            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+          </div>
+        </div>
+        <div>
+          <p class="form-label" style="margin-bottom:.65rem;" data-i18n="profile.new_pin">Новый PIN</p>
+          <div class="pin-row" id="chpin-new">
+            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+          </div>
+        </div>
+        <div>
+          <p class="form-label" style="margin-bottom:.65rem;" data-i18n="profile.confirm_pin">Подтвердите новый PIN</p>
+          <div class="pin-row" id="chpin-confirm">
+            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+          </div>
+        </div>
+        <div class="alert alert-error" id="err-chpin"><i class="ph ph-warning-circle"></i><span id="err-chpin-text"></span></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-close-modal="change-pin-modal" data-i18n="common.cancel">Отмена</button>
+      <button class="btn btn-primary" id="btn-save-pin" data-i18n="common.save">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     Change contact (email / phone) modal — 3-step wizard.
+     Step 1: confirm current contact (the frontend only has the masked
+             version, so the user must type the full one — proves they
+             know it). Skipped when LINKING a brand-new contact.
+     Step 2: enter the new contact and send a 6-digit code to it.
+     Step 3: enter the code → submit.
+     Backend (change-email / change-phone) revokes ALL sessions on success,
+     so the modal forces a logout after a successful save.
+     ══════════════════════════════════════════════════════════════ -->
+<div class="modal-backdrop" id="change-contact-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 class="modal-title" id="chc-title">—</h3>
+      <button class="modal-close" data-close-modal="change-contact-modal"><i class="ph ph-x"></i></button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex; flex-direction:column; gap:1rem;">
+
+        <!-- ── Step 1: confirm full current contact ───────────── -->
+        <div id="chc-step1" class="chc-step">
+          <p class="form-hint" style="margin-bottom:.75rem;" data-i18n="profile.change_contact_step1_hint">—</p>
+          <div class="form-group">
+            <label class="form-label" for="chc-current-input" data-i18n="profile.current_contact_label">Текущий контакт</label>
+            <input id="chc-current-input" type="text" class="form-input" autocomplete="off">
+            <div class="form-error" id="err-chc-current"><i class="ph ph-warning-circle"></i><span></span></div>
+          </div>
+        </div>
+
+        <!-- ── Step 2: new contact ────────────────────────────── -->
+        <div id="chc-step2" class="chc-step hidden">
+          <p class="form-hint" style="margin-bottom:.75rem;" data-i18n="profile.change_contact_step2_hint">—</p>
+          <div class="form-group">
+            <label class="form-label" for="chc-new-input" data-i18n="profile.new_contact_label">Новый контакт</label>
+            <input id="chc-new-input" type="text" class="form-input" autocomplete="off">
+            <div class="form-error" id="err-chc-new"><i class="ph ph-warning-circle"></i><span></span></div>
+          </div>
+        </div>
+
+        <!-- ── Step 3: enter the 6-digit code ─────────────────── -->
+        <div id="chc-step3" class="chc-step hidden">
+          <p class="form-hint" style="margin-bottom:.5rem;" data-i18n="profile.change_contact_step3_hint">—</p>
+          <p style="font-weight:600; margin:.25rem 0 .75rem;">
+            <span id="chc-step3-target">—</span>
+          </p>
+          <div class="form-group">
+            <p class="form-label" style="margin-bottom:.5rem;" data-i18n="profile.change_pwd_enter_code">Введите 6-значный код</p>
+            <div class="pin-row" id="chc-code-row">
+              <input class="pin-input chc-code-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+              <input class="pin-input chc-code-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+              <input class="pin-input chc-code-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+              <input class="pin-input chc-code-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+              <input class="pin-input chc-code-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+              <input class="pin-input chc-code-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            </div>
+            <p style="margin-top:.6rem; font-size:var(--text-xs); color:var(--clr-text-muted);">
+              <button type="button" id="btn-chc-resend" class="link-btn" data-i18n="auth.register.code_resend">Отправить заново</button>
+              <span id="chc-resend-wait" class="hidden">
+                (<span id="chc-resend-countdown">60</span>с)
+              </span>
+            </p>
+          </div>
+        </div>
+
+        <!-- "Detach instead" affordance — visible only in change mode for
+             contacts the user currently has, AND only when the user still
+             has another verified contact to fall back on. -->
+        <div id="chc-detach-row" style="margin-top:.5rem; padding-top:.85rem; border-top:1px solid var(--clr-border);">
+          <button type="button" id="btn-chc-detach" class="btn-detach-link">
+            <i class="ph-duotone ph-trash"></i>
+            <span data-i18n="profile.detach_contact">Открепить контакт</span>
+          </button>
+        </div>
+
+        <div class="alert alert-error" id="err-chc"><i class="ph ph-warning-circle"></i><span id="err-chc-text"></span></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="btn-chc-back" data-i18n="profile.change_contact_back" style="display:none;">Назад</button>
+      <button class="btn btn-secondary" data-close-modal="change-contact-modal" data-i18n="common.cancel">Отмена</button>
+      <button class="btn btn-primary" id="btn-chc-next" data-i18n="common.continue">Далее</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     Detach contact modal — simplified single-step proof:
+     type the full contact + the account password. The "can't detach the
+     last contact" guard lives on the backend.
+     ══════════════════════════════════════════════════════════════ -->
+<div class="modal-backdrop" id="detach-contact-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 class="modal-title" id="dtc-title" data-i18n="profile.detach_contact">Открепить контакт</h3>
+      <button class="modal-close" data-close-modal="detach-contact-modal"><i class="ph ph-x"></i></button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex; flex-direction:column; gap:1rem;">
+        <p class="form-hint" data-i18n="profile.detach_hint">Чтобы открепить контакт, введите его полностью и подтвердите паролем от аккаунта.</p>
+
+        <div class="form-group">
+          <label class="form-label" for="dtc-contact" data-i18n="profile.current_contact_label">Текущий контакт</label>
+          <input id="dtc-contact" type="text" class="form-input" autocomplete="off">
+          <div class="form-error" id="err-dtc-contact"><i class="ph ph-warning-circle"></i><span></span></div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="dtc-password" data-i18n="profile.current_password">Текущий пароль</label>
+          <div class="input-wrap">
+            <i class="ph ph-lock-simple input-icon"></i>
+            <input id="dtc-password" type="password" class="form-input" autocomplete="current-password">
+            <button type="button" class="input-action" data-toggle-pw="dtc-password" tabindex="-1">
+              <i class="ph ph-eye"></i>
+            </button>
+          </div>
+          <div class="form-error" id="err-dtc-password"><i class="ph ph-warning-circle"></i><span></span></div>
+        </div>
+
+        <div class="alert alert-error" id="err-dtc"><i class="ph ph-warning-circle"></i><span id="err-dtc-text"></span></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="btn-dtc-back" data-i18n="profile.change_contact_back">Назад</button>
+      <button class="btn btn-secondary" data-close-modal="detach-contact-modal" data-i18n="common.cancel">Отмена</button>
+      <button class="btn btn-danger" id="btn-dtc-submit" data-i18n="profile.detach_confirm">Открепить</button>
     </div>
   </div>
 </div>

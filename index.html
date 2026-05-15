@@ -8,7 +8,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/bold/style.css">
   <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/duotone/style.css">
   <link rel="stylesheet" href="style.css">
   <style>
     /* ── Landing extras ────────────────────────────────────────── */
@@ -444,11 +446,79 @@
       <button type="button" class="lang-btn active" data-lang="ru">RU</button>
       <button type="button" class="lang-btn"        data-lang="en">EN</button>
     </div>
-    <a href="/pages/login.html" class="btn btn-secondary" data-i18n="landing.cta_secondary">Войти</a>
-    <a href="/pages/register.html" class="btn btn-navy">
-      <i class="ph ph-user-plus"></i>
-      <span data-i18n="auth.register.title">Регистрация</span>
-    </a>
+
+    <!-- Guest variant: shown when NO rems_token in localStorage -->
+    <div id="nav-guest" style="display:contents;">
+      <a href="/pages/login.html" class="btn btn-secondary" data-i18n="landing.cta_secondary">Войти</a>
+      <a href="/pages/register.html" class="btn btn-navy">
+        <i class="ph ph-user-plus"></i>
+        <span data-i18n="auth.register.title">Регистрация</span>
+      </a>
+    </div>
+
+    <!-- Logged-in variant: shown when rems_token is present.
+         Hidden by default; JS at bottom of page toggles visibility AFTER
+         a successful /api/profile/me fetch so we don't flash the user UI
+         for a stale/invalid token. -->
+    <div id="nav-user" class="hidden" style="display:contents;">
+      <button class="btn btn-icon btn-ghost" id="nav-bell" style="position:relative;" aria-label="Уведомления">
+        <i class="ph ph-bell" style="font-size:1.25rem;"></i>
+        <span class="badge-dot" id="nav-bell-dot" style="position:absolute; top:.4rem; right:.4rem; display:none;"></span>
+      </button>
+
+      <div style="position:relative;">
+        <button id="nav-user-trigger" class="navbar-user-trigger"
+                style="display:flex; align-items:center; gap:.6rem; padding:.4rem .65rem; border-radius:var(--radius-lg); border:1px solid transparent; background:transparent; font-family:inherit; cursor:pointer; transition:background .15s;">
+          <span id="nav-user-name" style="font-size:var(--text-sm); font-weight:600; color:var(--clr-navy);">…</span>
+          <span class="avatar avatar-sm" style="pointer-events:none;">
+            <span id="nav-user-initials">?</span>
+            <img id="nav-user-avatar" src="" alt="" style="display:none;">
+          </span>
+        </button>
+
+        <div id="nav-user-dropdown" class="hidden"
+             style="position:absolute; top:calc(100% + .5rem); right:0; background:var(--clr-surface);
+                    border:1px solid var(--clr-border); border-radius:var(--radius-lg);
+                    box-shadow:var(--shadow-lg); min-width:260px; z-index:60; overflow:hidden;">
+          <!-- ── User header: full name + masked contact ─────────── -->
+          <div style="padding:.85rem 1rem; border-bottom:1px solid var(--clr-border);">
+            <div id="nav-dd-name"
+                 style="font-size:var(--text-sm); font-weight:700; color:var(--clr-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+              —
+            </div>
+            <div id="nav-dd-contact"
+                 style="font-size:var(--text-xs); color:var(--clr-text-muted); margin-top:.15rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+              —
+            </div>
+          </div>
+
+          <!-- ── Org row: clickable → /dashboard#org. Shows role badge if
+                  user is an approved member, otherwise membership status. -->
+          <a id="nav-dd-org-link" href="/pages/dashboard.html#org" class="nav-item"
+             style="border-radius:0; border:none; align-items:flex-start; gap:.65rem; padding:.7rem 1rem;">
+            <i class="ph ph-buildings" style="margin-top:.15rem;"></i>
+            <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:.25rem;">
+              <span id="nav-dd-org"
+                    style="font-size:var(--text-sm); font-weight:600; color:var(--clr-navy); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                —
+              </span>
+              <span id="nav-dd-pill" class="badge badge-default" style="font-size:var(--text-xs); align-self:flex-start;">—</span>
+            </div>
+          </a>
+
+          <a href="/pages/dashboard.html#profile" class="nav-item" style="border-radius:0; border:none;">
+            <i class="ph ph-user"></i>
+            <span data-i18n="nav.profile">Профиль</span>
+          </a>
+          <div style="border-top:1px solid var(--clr-border); padding:.25rem;">
+            <button id="nav-logout" class="nav-item" style="border-radius:var(--radius-sm); color:var(--clr-error);">
+              <i class="ph ph-sign-out" style="color:var(--clr-error);"></i>
+              <span data-i18n="nav.logout">Выйти</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </header>
 
@@ -896,10 +966,141 @@
 <div id="toast-container"></div>
 
 <script type="module">
-  /* ── Landing page i18n boot — async IIFE for max browser compat ── */
-  import { initI18n } from './js/i18n.js';
+  /* ── Landing page boot ───────────────────────────────────────────
+     Two things:
+       1. initI18n
+       2. If a token exists in localStorage, fetch /api/profile/me;
+          on success → show "logged in" header variant.
+          on 401/404 → wipe stale token and keep guest variant.
+     async IIFE for backwards browser compat. ───────────────────── */
+  import { initI18n, t }       from './js/i18n.js';
+  import { profile, clearSession } from './js/api.js';
+  import { logout }            from './js/auth.js';
+
+  function $(s){ return document.querySelector(s); }
+
+  // Status descriptor — chip class + duotone icon (mirrors the dashboard
+  // statusBadge() helper). We render container-less chips here so the
+  // landing-page dropdown matches the dashboard look.
+  function statusDescriptor(status) {
+    switch (status) {
+      case 'approved':  return { key: 'membership.status_approved',  chip: 'chip-success', icon: 'ph-check-circle' };
+      case 'pending':   return { key: 'membership.status_pending',   chip: 'chip-warning', icon: 'ph-hourglass-medium' };
+      case 'rejected':  return { key: 'membership.status_rejected',  chip: 'chip-error',   icon: 'ph-x-circle' };
+      case 'suspended': return { key: 'membership.status_suspended', chip: 'chip-default', icon: 'ph-pause-circle' };
+      default:          return { key: 'membership.status_unknown',   chip: 'chip-default', icon: 'ph-question' };
+    }
+  }
+  function roleDescriptor(role) {
+    switch (role) {
+      case 'owner':      return { key: 'roles.owner',      chip: 'chip-owner',      icon: 'ph-shield-star' };
+      case 'manager':    return { key: 'roles.manager',    chip: 'chip-manager',    icon: 'ph-briefcase' };
+      case 'technician': return { key: 'roles.technician', chip: 'chip-technician', icon: 'ph-wrench' };
+      case 'employee':   return { key: 'roles.employee',   chip: 'chip-employee',   icon: 'ph-user' };
+      default:           return { key: 'membership.status_unknown', chip: 'chip-default', icon: 'ph-user' };
+    }
+  }
+  // data-i18n on the inner <span> only: applyTranslations() does
+  // textContent = t(...) on the matched element, so placing it on the
+  // outer chip would erase the icon child on every language switch.
+  function renderChip(el, desc) {
+    if (!el || !desc) return;
+    el.className = `row-chip ${desc.chip}`;
+    el.removeAttribute('data-i18n');
+    el.innerHTML = `<span data-i18n="${desc.key}">${t(desc.key)}</span><i class="ph-duotone ${desc.icon}"></i>`;
+  }
+
+  function initials(name) {
+    return String(name || '?').split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase()).join('') || '?';
+  }
+
+  async function applyLoggedInHeader() {
+    const data = (await profile.get()).data;
+    const u    = data.user;
+    const org  = data.organization;
+
+    // Trigger (avatar + name in the navbar itself).
+    const displayName = u.full_name || u.email_masked || u.phone_masked || '—';
+    $('#nav-user-name').textContent     = displayName;
+    $('#nav-user-initials').textContent = initials(u.full_name || u.email_masked);
+    if (u.avatar?.url) {
+      $('#nav-user-initials').style.display = 'none';
+      const img = $('#nav-user-avatar');
+      img.src = u.avatar.url;
+      img.style.display = '';
+    }
+
+    // Dropdown header — name + masked contact (prefer the verified one).
+    $('#nav-dd-name').textContent = displayName;
+    const maskedContact = u.email_masked || u.phone_masked || `#${u.id}`;
+    $('#nav-dd-contact').textContent = maskedContact;
+
+    // Org row + role-or-status pill.
+    //   • If user is an APPROVED member → show org name + role badge.
+    //   • Otherwise (pending/rejected/suspended/no-org) → show org name
+    //     (or fallback) + status badge so the user understands why the
+    //     dashboard might look limited.
+    const orgEl     = $('#nav-dd-org');
+    const pillEl    = $('#nav-dd-pill');
+    const orgLinkEl = $('#nav-dd-org-link');
+    orgEl.textContent = org?.name || '—';
+    // No org row to navigate to → hide the whole org link
+    if (orgLinkEl) orgLinkEl.style.display = org ? '' : 'none';
+
+    const isApproved = u.membership_status === 'approved';
+    if (isApproved && u.org_role) {
+      renderChip(pillEl, roleDescriptor(u.org_role));
+    } else {
+      renderChip(pillEl, statusDescriptor(u.membership_status));
+    }
+
+    $('#nav-guest').classList.add('hidden');
+    $('#nav-user').classList.remove('hidden');
+  }
+
+  function wireUserDropdown() {
+    const trigger = $('#nav-user-trigger');
+    const dd      = $('#nav-user-dropdown');
+    trigger?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dd.classList.toggle('hidden');
+    });
+    document.addEventListener('click', (e) => {
+      if (!dd.contains(e.target) && e.target !== trigger) dd.classList.add('hidden');
+    });
+    // Click on name → go to Обзор tab; click on avatar (inside trigger) → same.
+    $('#nav-user-name')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      window.location.href = '/pages/dashboard.html';
+    });
+    $('#nav-logout')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      logout();
+    });
+    // Bell goes straight to notifications tab
+    $('#nav-bell')?.addEventListener('click', () => {
+      window.location.href = '/pages/dashboard.html#notifications';
+    });
+  }
+
   (async () => {
     try { await initI18n(); } catch (e) { console.error('[landing] i18n failed:', e); }
+
+    // Only try to fetch profile if there's a token at all — no point
+    // burning a 401 every page load for guests.
+    if (localStorage.getItem('rems_token')) {
+      try {
+        await applyLoggedInHeader();
+        wireUserDropdown();
+      } catch (err) {
+        // 401/404 → invalid/stale token. Wipe and fall back to guest UI.
+        if (err?.status === 401 || err?.status === 404) {
+          clearSession();
+        } else {
+          console.warn('[landing] profile fetch failed:', err?.message);
+        }
+      }
+    }
   })();
 </script>
 </body>

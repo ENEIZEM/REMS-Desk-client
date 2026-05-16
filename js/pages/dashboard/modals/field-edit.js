@@ -54,17 +54,10 @@ const FIELD_EDITORS = {
     save:    (val) => org.updateSettings({ organization_name: val }),
     successKey: 'profile.saved_org',
   },
-  occupation: {
-    title:  'profile.org_type',
-    type:   'select',
-    options: [
-      { value: 'customer',   labelKey: 'profile.org_type_customer' },
-      { value: 'contractor', labelKey: 'profile.org_type_contractor' },
-    ],
-    current: () => _ctx.getOrgData()?.occupation || 'customer',
-    save:    (val) => org.updateSettings({ occupation: val }),
-    successKey: 'profile.saved_org',
-  },
+  // `occupation` (customer / contractor) editor removed alongside the
+  // organizations.occupation column — that distinction now lives on each
+  // contract row between two organisations, not as an attribute of the
+  // org itself.
 
   // SLA fields
   internal_sla_critical_h: { title: 'profile.sla_critical', type: 'number', min: 1, max: 240, current: () => _ctx.getOrgData()?.limits?.internal_sla_critical_h, save: (v) => org.updateLimits({ internal_sla_critical_h: v }), successKey: 'profile.sla_saved' },

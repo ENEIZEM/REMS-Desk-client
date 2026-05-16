@@ -6,7 +6,7 @@
 
 import { t } from '../../../i18n.js';
 import {
-  orgStatusBadge, orgTypeBadge, roleBadgeDescriptor,
+  orgStatusBadge, roleBadgeDescriptor,
   renderIconBadge, renderRowChip,
 } from '../badges.js';
 import { fmtDate, fmtBytes, initials } from '../format.js';
@@ -30,7 +30,7 @@ export function populateOrgTab(org, role, canEditOrg, canEditLim) {
   // member count. Member count lives in the Подписка card.
   document.querySelector('#org-head-plan').textContent = org.subscription_purchased ? 'Pro' : 'Free';
 
-  renderIconBadge(document.querySelector('#org-head-type'),   orgTypeBadge(org.occupation));
+  // org_type badge intentionally not rendered — see badges.js comment.
   renderIconBadge(document.querySelector('#org-head-active'), orgStatusBadge(org.is_active));
   renderIconBadge(document.querySelector('#org-head-myrole'), roleBadgeDescriptor(role));
 
@@ -52,25 +52,16 @@ export function populateOrgTab(org, role, canEditOrg, canEditLim) {
   else            { logoWrap.classList.remove('editable'); logoOvr.style.display = 'none'; }
 
   // ── About card — container-less chips for read-only rows ───
-  renderRowChip(document.querySelector('#org-info-type'),   orgTypeBadge(org.occupation));
+  // org_type row removed alongside the column itself.
   renderRowChip(document.querySelector('#org-info-status'), orgStatusBadge(org.is_active));
   renderRowChip(document.querySelector('#org-info-myrole'), roleBadgeDescriptor(role));
   document.querySelector('#org-info-created').textContent = fmtDate(org.created_at);
+  document.querySelector('#org-info-updated').textContent = fmtDate(org.updated_at);
 
-  // Role-change tooltip (same logic as on the Profile tab)
-  const roleTipOrg = document.querySelector('#org-info-role-tooltip');
-  if (roleTipOrg) {
-    let tipKey = null;
-    if (role === 'manager')    tipKey = 'profile.role_change_hint_manager';
-    else if (role !== 'owner') tipKey = 'profile.role_change_hint';
-    if (tipKey) {
-      roleTipOrg.classList.remove('hidden');
-      roleTipOrg.setAttribute('data-tooltip-key', tipKey);
-      roleTipOrg.setAttribute('data-tooltip-text', t(tipKey));
-    } else {
-      roleTipOrg.classList.add('hidden');
-    }
-  }
+  // Role-change tooltip — irrelevant once the role list collapsed to
+  // owner+employee. Owner needs no hint; employee can't change role
+  // through self-service either. Keep the element hidden.
+  document.querySelector('#org-info-role-tooltip')?.classList.add('hidden');
 
   // ── Subscription + counters ────────────────────────────────
   document.querySelector('#sub-plan-line').textContent = org.subscription_purchased ? 'Pro' : 'Free';

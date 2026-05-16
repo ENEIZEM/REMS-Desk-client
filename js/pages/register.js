@@ -188,7 +188,10 @@ function hideAlert(id) {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // ROLE SELECTION
+  // ROLE SELECTION — owner (creates a new org) vs employee (joins an
+  // existing org by ID). The fine-grained manager / technician roles
+  // from earlier drafts are gone; assignment of specific responsibility
+  // for a request happens through the request itself, not the user row.
   // ─────────────────────────────────────────────────────────────
   document.querySelectorAll('input[name="role"]').forEach(radio => {
     radio.addEventListener('change', () => {
@@ -202,33 +205,11 @@ function hideAlert(id) {
 
       const orgNameGrp = document.getElementById('org-name-group');
       const orgIdGrp   = document.getElementById('org-id-group');
-      const occGrp     = document.getElementById('org-occupation-group');
       if (orgNameGrp) orgNameGrp.style.display = selectedRole === 'owner' ? '' : 'none';
-      if (occGrp)     occGrp.style.display     = selectedRole === 'owner' ? '' : 'none';
       if (orgIdGrp)   orgIdGrp.style.display   = selectedRole === 'owner' ? 'none' : '';
 
       clearFieldError('err-role');
     });
-  });
-
-  // ─────────────────────────────────────────────────────────────
-  // OCCUPATION RADIO — same .selected visual feedback as role cards.
-  // Only owner sees this group (toggled by the role handler above).
-  // ─────────────────────────────────────────────────────────────
-  let selectedOccupation = 'customer';   // sensible default — most signups
-  document.querySelectorAll('input[name="occupation"]').forEach(radio => {
-    radio.addEventListener('change', () => {
-      selectedOccupation = radio.value;
-      document.querySelectorAll('#occupation-grid .role-card').forEach(card => {
-        const r = card.querySelector('input[name="occupation"]');
-        card.classList.toggle('selected', !!r?.checked);
-      });
-    });
-  });
-  // Apply the initial "selected" visual to the default-checked card.
-  document.querySelectorAll('#occupation-grid .role-card').forEach(card => {
-    const r = card.querySelector('input[name="occupation"]');
-    if (r?.checked) card.classList.add('selected');
   });
 
   // ─────────────────────────────────────────────────────────────
@@ -301,7 +282,6 @@ function hideAlert(id) {
       } else {
         state.organization_name = orgName;
         state.organization_id   = null;
-        state.occupation        = selectedOccupation;
       }
     } else if (selectedRole) {
       const orgIdRaw = q('#org-id')?.value.trim() ?? '';
@@ -312,7 +292,6 @@ function hideAlert(id) {
       } else {
         state.organization_name = '';
         state.organization_id   = orgIdNum;
-        state.occupation        = null;     // inherited from the existing org
       }
     }
 
@@ -522,12 +501,9 @@ function hideAlert(id) {
     if (dept) payload.department = dept;
     if (state.role === 'owner') {
       payload.organization_name = state.organization_name;
-      // Owner also picks customer/contractor at registration time —
-      // the backend stores it on the freshly-created organisation.
-      if (state.occupation) payload.occupation = state.occupation;
-    } else {
-      if (state.organization_id) payload.organization_id = state.organization_id;
-      payload.requested_role = state.role;
+    } else if (state.organization_id) {
+      // Joining an existing org: backend always assigns role=employee.
+      payload.organization_id = state.organization_id;
     }
 
     const btn = q('#btn-step3');

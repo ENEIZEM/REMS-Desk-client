@@ -41,19 +41,9 @@ export function renderProfileTab(user, role, isOwner, ownerOrgCreatedAt) {
   //   owner   → hidden (nothing useful to say)
   //   manager → shown with the "you can change technician/employee" hint
   //   other   → shown with the generic "ask your owner/manager" hint
-  const roleTipPersonal = document.querySelector('#info-role-tooltip');
-  if (roleTipPersonal) {
-    let tipKey = null;
-    if (role === 'manager')    tipKey = 'profile.role_change_hint_manager';
-    else if (role !== 'owner') tipKey = 'profile.role_change_hint';
-    if (tipKey) {
-      roleTipPersonal.classList.remove('hidden');
-      roleTipPersonal.setAttribute('data-tooltip-key', tipKey);
-      roleTipPersonal.setAttribute('data-tooltip-text', t(tipKey));
-    } else {
-      roleTipPersonal.classList.add('hidden');
-    }
-  }
+  // Role-change tooltip — N/A with the owner+employee model
+  // (no role transitions through self-service).
+  document.querySelector('#info-role-tooltip')?.classList.add('hidden');
 
   // Contacts: masked value as sub-line under label, action button on right.
   // The button flips between "Сменить" (gray) and "Привязать" (green)

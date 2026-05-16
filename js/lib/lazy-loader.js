@@ -1,0 +1,86 @@
+/* ═══════════════════════════════════════════════════════════════
+   REMS — Lazy loader overlay
+   ───────────────────────────────────────────────────────────────
+   Wraps an async operation with a deferred + minimum-visible loader.
+   Goal: don't flash a spinner for fast operations, but if something
+   IS slow, never strobe the spinner in for <100 ms either.
+
+   Defaults:
+     • showAfter:    1500 ms — under this, no overlay renders at all
+     • minVisible:   1500 ms — once shown, stays at least this long
+                                even if the promise has already resolved
+
+   Usage:
+     await lazyLoad(profile.get(), { container: q('#tab-profile') });
+
+   Or attach freely and return a `done()` to clear:
+     const stop = attachLoader({ container });
+     try { await work(); } finally { stop(); }
+   ═══════════════════════════════════════════════════════════════ */
+
+/**
+ * Wrap a promise with the deferred + minimum-visible overlay.
+ * Returns the original promise unchanged.
+ */
+export function lazyLoad(promise, opts = {}) {
+  const stop = attachLoader(opts);
+  promise.then(stop, stop);
+  return promise;
+}
+
+/**
+ * Attach an overlay manually. Returns a function that, when called,
+ * tears the overlay down respecting the minVisible floor.
+ */
+export function attachLoader({
+  container,
+  showAfter  = 1500,
+  minVisible = 1500,
+} = {}) {
+  const host = container || document.body;
+  let overlay = null;
+  let shownAt = 0;
+  let cancelled = false;
+  let originalPosition = null;
+
+  const showTimer = setTimeout(() => {
+    if (cancelled) return;
+    shownAt = Date.now();
+    overlay = document.createElement('div');
+    overlay.className = 'loader-overlay';
+    overlay.innerHTML = '<span class="spinner spinner-lg" aria-label="Loading"></span>';
+
+    // Anchor the absolutely-positioned overlay to the host. If the host
+    // is positioned statically we promote it to `relative` only for as
+    // long as the overlay lives; the original value is restored on
+    // teardown so we never permanently mutate the host's layout.
+    if (host !== document.body) {
+      const cs = getComputedStyle(host);
+      if (cs.position === 'static') {
+        originalPosition = host.style.position;
+        host.style.position = 'relative';
+      }
+    } else {
+      overlay.classList.add('loader-overlay--fixed');
+    }
+    host.appendChild(overlay);
+  }, showAfter);
+
+  return function stop() {
+    cancelled = true;
+    clearTimeout(showTimer);
+    if (!overlay) return;
+    const elapsed   = Date.now() - shownAt;
+    const remaining = Math.max(0, minVisible - elapsed);
+    const node      = overlay;
+    overlay = null;
+    setTimeout(() => {
+      node.classList.add('loader-overlay--fade');
+      // Match the CSS fade-out duration so we don't yank the node mid-anim.
+      setTimeout(() => {
+        node.remove();
+        if (originalPosition !== null) host.style.position = originalPosition;
+      }, 180);
+    }, remaining);
+  };
+}

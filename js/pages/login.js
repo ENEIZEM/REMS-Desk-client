@@ -21,8 +21,15 @@ import { wireFormGuard }                     from '../form-guard.js';
 
 // ── Hoisted helpers ─────────────────────────────────────────────
 function q(sel) { return document.querySelector(sel); }
+// `on=false` is suppressed if the button is currently mid-lockout
+// (data-lockedUntil > now) — the countdown timer owns the disabled
+// state until it expires, and request-finally hooks must respect it.
 function setLoading(btn, on) {
   if (!btn) return;
+  if (!on && btn.dataset.lockedUntil && Number(btn.dataset.lockedUntil) > Date.now()) {
+    btn.classList.toggle('btn-loading', false);
+    return;
+  }
   btn.disabled = on;
   btn.classList.toggle('btn-loading', on);
 }
@@ -98,7 +105,11 @@ function fmtCountdown(secs) {
 
 // Render the alert text by interpolating {n} / {time} from a params bag.
 // If a live `retry_after` (seconds) is present, install a 1s interval that
-// keeps the countdown text fresh until it hits 0.
+// keeps the countdown text fresh until it hits 0. While the countdown is
+// running, the two submit buttons (#btn-password, #btn-pin) are forced
+// disabled (greyed out, .btn-loading off) so the user can't fire another
+// request that the backend would just reject; the disabled flag is lifted
+// when the timer reaches zero.
 function showAlertWithParams(alertId, textId, key, params = {}) {
   const alertEl = document.getElementById(alertId);
   if (!alertEl) return;
@@ -125,6 +136,16 @@ function showAlertWithParams(alertId, textId, key, params = {}) {
   if (typeof params.retry_after === 'number' && params.retry_after > 0) {
     const startedAt = Date.now();
     const total     = params.retry_after;
+    // Force-disable both submit buttons for the duration. We set a flag
+    // (data-locked-until) so subsequent form-guard refreshes can't flip
+    // disabled=false during the countdown.
+    const lockedUntil = startedAt + total * 1000;
+    [q('#btn-password'), q('#btn-pin')].forEach(btn => {
+      if (!btn) return;
+      btn.dataset.lockedUntil = String(lockedUntil);
+      btn.disabled = true;
+      btn.classList.remove('btn-loading');
+    });
     const tick = () => {
       const left = total - Math.floor((Date.now() - startedAt) / 1000);
       if (left <= 0) {
@@ -133,6 +154,13 @@ function showAlertWithParams(alertId, textId, key, params = {}) {
         // Keep the alert visible at 0:00 so the user can re-try with the
         // same click — no flicker on the page.
         render({ time: '0:00' });
+        // Release the buttons; form-guard will recompute disabled-state
+        // from the current input values on the next user interaction.
+        [q('#btn-password'), q('#btn-pin')].forEach(btn => {
+          if (!btn) return;
+          delete btn.dataset.lockedUntil;
+          btn.disabled = false;
+        });
         return;
       }
       render({ time: fmtCountdown(left) });

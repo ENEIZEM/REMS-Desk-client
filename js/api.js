@@ -158,6 +158,7 @@ export const profile = {
 
   /** Confirm a temp upload as the user's avatar. mediaFileId from POST /api/upload/temp response. */
   confirmAvatar: (mediaFileId) => request('POST', '/profile/avatar/confirm', { media_file_id: mediaFileId }),
+  deleteAvatar:  ()             => request('DELETE', '/profile/avatar'),
 };
 
 // ─────────────────────────────────────────────────────────────────
@@ -186,23 +187,26 @@ export const org = {
 
   /** Confirm a temp upload as the org logo. */
   confirmLogo: (mediaFileId) => request('POST', '/orgs/profile/logo/confirm', { media_file_id: mediaFileId }),
+  deleteLogo:  ()             => request('DELETE', '/orgs/profile/logo'),
 };
 
 // ─────────────────────────────────────────────────────────────────
 // ORGANISATION MEMBERS  →  /api/orgs/members/*
 // GET   /api/orgs/members/pending
 // POST  /api/orgs/members/invite   body: { contact, requested_role }
-// PATCH /api/orgs/members/manage   body: { userId, action, new_role? }
+// PATCH /api/orgs/members/manage   body: { userId, action }
 // ─────────────────────────────────────────────────────────────────
 export const members = {
   listPending: () => request('GET', '/orgs/members/pending'),
 
-  /** contact: email, phone, or numeric userId string; role: 'employee'|'technician'|'manager' */
-  invite: (contact, role) => request('POST', '/orgs/members/invite', { contact, requested_role: role }),
+  /** contact: email, phone, or numeric userId string. Role is always
+      employee — the invite endpoint no longer accepts a role param. */
+  invite: (contact) => request('POST', '/orgs/members/invite', { contact }),
 
-  /** action: 'approved'|'rejected'|'suspended'; newRole is optional */
-  manage: (userId, action, newRole) =>
-    request('PATCH', '/orgs/members/manage', { userId, action, ...(newRole && { new_role: newRole }) }),
+  /** action: 'approved'|'rejected'|'suspended' — role transitions are
+      not available for the owner/employee model. */
+  manage: (userId, action) =>
+    request('PATCH', '/orgs/members/manage', { userId, action }),
 };
 
 // ─────────────────────────────────────────────────────────────────

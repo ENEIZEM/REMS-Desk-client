@@ -13,6 +13,25 @@
   <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/duotone/style.css">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="css/landing.css">
+  <!-- Sync flag for the auth state — set BEFORE first paint so the
+       navbar doesn't briefly flash the guest variant (Login / Register)
+       when the user is already authenticated and the page is reloading
+       from the dashboard. The .has-auth selector below CSS-hides
+       #nav-guest until applyLoggedInHeader() either confirms the token
+       and toggles to #nav-user, or 401s and clears the flag. -->
+  <script>
+    try {
+      if (localStorage.getItem('rems_token')) {
+        document.documentElement.classList.add('has-auth');
+      }
+    } catch (_) {}
+  </script>
+  <style>
+    /* CSS partner of the inline script above — keep the guest variant
+       collapsed while we wait for /api/profile/me. The nav-user block
+       stays .hidden until applyLoggedInHeader() removes the class. */
+    .has-auth #nav-guest { display: none !important; }
+  </style>
   <style>
     /* ── Landing extras ────────────────────────────────────────── */
 
@@ -569,7 +588,7 @@
               <div class="mockup-logo-icon"><i class="ph ph-wrench"></i></div>
               REMS
             </div>
-            <span style="font-size:.6rem; color:var(--clr-text-muted);">Иванов И.И. · Техник</span>
+            <span style="font-size:.6rem; color:var(--clr-text-muted);">Иванов И.И. · Сотрудник</span>
           </div>
           <div class="mockup-stats">
             <div class="mockup-stat">
@@ -681,7 +700,7 @@
             </div>
             <div class="guide-step-body">
               <div class="guide-step-title" data-i18n="landing.guideA2_title">Сотрудники присоединяются по ID</div>
-              <p class="guide-step-desc" data-i18n="landing.guideA2_desc">Менеджеры, техники и рядовые сотрудники регистрируются, указав ID организации. Руководитель одобряет заявки.</p>
+              <p class="guide-step-desc" data-i18n="landing.guideA2_desc">Сотрудники регистрируются, указав ID организации. Руководитель одобряет заявки на вступление.</p>
             </div>
           </div>
           <div class="guide-step">
@@ -691,7 +710,7 @@
             </div>
             <div class="guide-step-body">
               <div class="guide-step-title" data-i18n="landing.guideA3_title">Заявки — от подачи до закрытия</div>
-              <p class="guide-step-desc" data-i18n="landing.guideA3_desc">Сотрудник сообщает о неисправности → менеджер назначает техника → техник чинит и закрывает заявку.</p>
+              <p class="guide-step-desc" data-i18n="landing.guideA3_desc">Один сотрудник создаёт заявку → другой берёт её в работу и закрывает после ремонта. Руководитель видит весь поток заявок.</p>
             </div>
           </div>
         </div>
@@ -738,7 +757,7 @@
             </div>
             <div class="guide-step-body">
               <div class="guide-step-title" data-i18n="landing.guideB3_title">Обменивайтесь заявками прозрачно</div>
-              <p class="guide-step-desc" data-i18n="landing.guideB3_desc">Ваши сотрудники создают заявки → техники подрядчика принимают их в работу → вы отслеживаете каждый этап в реальном времени.</p>
+              <p class="guide-step-desc" data-i18n="landing.guideB3_desc">Ваши сотрудники создают заявки → сотрудники подрядчика принимают их в работу → вы отслеживаете каждый этап в реальном времени.</p>
             </div>
           </div>
         </div>
@@ -847,7 +866,7 @@
         <div class="status-icon"><i class="ph ph-check-circle"></i></div>
         <div class="status-badge" data-i18n="landing.status_accepted_name">Принята</div>
         <p class="status-desc" data-i18n="landing.status_accepted_desc">
-          Менеджер принял заявку в работу и оценил приоритет.
+          Заявка взята в работу: исполнитель оценил приоритет.
         </p>
       </div>
 
@@ -858,7 +877,7 @@
         <div class="status-icon"><i class="ph ph-wrench"></i></div>
         <div class="status-badge" data-i18n="landing.status_inprogress_name">В работе</div>
         <p class="status-desc" data-i18n="landing.status_inprogress_desc">
-          Техник назначен и ведёт ремонт или диагностику оборудования.
+          Исполнитель ведёт ремонт или диагностику оборудования.
         </p>
       </div>
 
@@ -869,7 +888,7 @@
         <div class="status-icon"><i class="ph ph-seal-check"></i></div>
         <div class="status-badge" data-i18n="landing.status_done_name">Завершена</div>
         <p class="status-desc" data-i18n="landing.status_done_desc">
-          Техник зафиксировал результат. Ожидается подтверждение от заявителя.
+          Исполнитель зафиксировал результат. Ожидается подтверждение от заявителя.
         </p>
       </div>
 
@@ -900,29 +919,13 @@
         REMS поддерживает разные уровни доступа в рамках одной организации
       </p>
     </div>
-    <div class="role-pill-grid">
+    <div class="role-pill-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));">
 
       <div class="role-pill">
         <div class="role-pill-icon navy"><i class="ph ph-crown-simple"></i></div>
         <div class="role-pill-title" data-i18n="landing.role_owner_title">Руководитель</div>
         <p class="role-pill-desc" data-i18n="landing.role_owner_desc">
-          Создаёт организацию, добавляет сотрудников, контролирует все заявки и видит полную статистику.
-        </p>
-      </div>
-
-      <div class="role-pill">
-        <div class="role-pill-icon navy"><i class="ph ph-briefcase"></i></div>
-        <div class="role-pill-title" data-i18n="landing.role_manager_title">Менеджер</div>
-        <p class="role-pill-desc" data-i18n="landing.role_manager_desc">
-          Принимает и распределяет заявки между техниками, следит за сроками выполнения.
-        </p>
-      </div>
-
-      <div class="role-pill">
-        <div class="role-pill-icon green"><i class="ph ph-wrench"></i></div>
-        <div class="role-pill-title" data-i18n="landing.role_tech_title">Техник</div>
-        <p class="role-pill-desc" data-i18n="landing.role_tech_desc">
-          Получает задания, фиксирует выполненные работы, комментирует ход ремонта.
+          Создаёт организацию, приглашает сотрудников, управляет тарифом и лимитами, видит полную статистику по заявкам.
         </p>
       </div>
 
@@ -930,7 +933,7 @@
         <div class="role-pill-icon green"><i class="ph ph-user"></i></div>
         <div class="role-pill-title" data-i18n="landing.role_emp_title">Сотрудник</div>
         <p class="role-pill-desc" data-i18n="landing.role_emp_desc">
-          Подаёт заявки на ремонт своего оборудования и отслеживает их статус.
+          Подаёт заявки на ремонт своего оборудования, берёт чужие заявки в работу и отслеживает их статус.
         </p>
       </div>
 
@@ -1106,6 +1109,10 @@
         // 401/404 → invalid/stale token. Wipe and fall back to guest UI.
         if (err?.status === 401 || err?.status === 404) {
           clearSession();
+          // Token was stale — drop the .has-auth flag so the CSS rule
+          // stops hiding #nav-guest and the user sees the Login /
+          // Register buttons (which is the correct state now).
+          document.documentElement.classList.remove('has-auth');
         } else {
           console.warn('[landing] profile fetch failed:', err?.message);
         }

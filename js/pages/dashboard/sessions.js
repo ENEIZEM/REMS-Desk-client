@@ -11,6 +11,7 @@
 import { profile }                from '../../api.js';
 import { errorMessage }           from '../../auth.js';
 import { t, getLang }             from '../../i18n.js';
+import { attachLoader }           from '../../lib/lazy-loader.js';
 
 function osIcon(os) {
   if (!os) return 'ph-monitor';
@@ -67,10 +68,11 @@ export async function loadSessions() {
   const cntEl  = document.querySelector('#sessions-count');
   if (!listEl) return;
 
-  listEl.innerHTML = `<div class="empty-state" style="padding:1.5rem 0;">
-    <i class="ph ph-spinner"></i>
-    <p class="empty-state-text">${t('profile.sessions_loading')}</p>
-  </div>`;
+  // Empty the list area and arm the deferred loader. The overlay only
+  // surfaces if the fetch takes >1.5 s; otherwise the user just sees
+  // the new rows pop in without any flicker.
+  listEl.innerHTML = '';
+  const stopLoader = attachLoader({ container: listEl });
 
   try {
     const resp = await profile.sessions();
@@ -134,5 +136,7 @@ export async function loadSessions() {
       <i class="ph ph-warning-circle"></i>
       <p class="empty-state-text">${errorMessage(err)}</p>
     </div>`;
+  } finally {
+    stopLoader();
   }
 }

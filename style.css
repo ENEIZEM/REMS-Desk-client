@@ -156,7 +156,58 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.25; color: var(--clr-t
 .btn-xl  { padding: 0.875rem var(--space-8); font-size: var(--text-base); font-weight: 600; }
 .btn-icon { padding: 0.5rem; border-radius: var(--radius-md); }
 
-/* Loading spinner */
+/* ── Loaders ──────────────────────────────────────────────────────
+   • .spinner — standalone two-tone ring (teal + navy) for in-page
+     loading states (sessions, lists, etc.). Sized via font-size on
+     the parent or via inline --spinner-size if needed.
+   • .btn-loading — the form-button busy state. White ring on filled
+     buttons, accent ring on ghost/secondary.
+   Both share the same `spin` keyframe. */
+
+.spinner {
+  display: inline-block;
+  width:  var(--spinner-size, 1.5rem);
+  height: var(--spinner-size, 1.5rem);
+  border-radius: 50%;
+  /* Two arcs of the ring — teal sweeping 270°, navy filling the rest
+     — give the rotation a recognisable "REMS" pair-tone signature. */
+  background: conic-gradient(
+    from 0deg,
+    var(--clr-accent) 0deg,
+    var(--clr-accent) 270deg,
+    var(--clr-navy)   270deg,
+    var(--clr-navy)   360deg
+  );
+  /* Punch a transparent hole in the middle to form a ring. */
+  -webkit-mask:
+    radial-gradient(circle, transparent calc(50% - 3px), #000 calc(50% - 2px));
+          mask:
+    radial-gradient(circle, transparent calc(50% - 3px), #000 calc(50% - 2px));
+  animation: spin 0.9s linear infinite;
+}
+.spinner-lg { --spinner-size: 2rem; }
+.spinner-sm { --spinner-size: 1rem; }
+
+/* ── Loader overlay (lib/lazy-loader.js) ───────────────────────────
+   Renders a centered .spinner on top of its container with a slight
+   translucent backdrop so the underlying content reads as "loading"
+   without being torn out of the DOM. The fixed variant pins the
+   overlay to the viewport for full-page loads. */
+.loader-overlay {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  /* Light-tinted veil over the host container. Avoid backdrop-filter:
+     some Chromium builds stall the renderer when it's combined with
+     animations on a parent with frequent reflows. */
+  background: color-mix(in srgb, var(--clr-bg) 78%, transparent);
+  z-index: 20;
+  animation: loader-overlay-in 180ms ease-out;
+}
+.loader-overlay--fixed { position: fixed; }
+.loader-overlay--fade  { animation: loader-overlay-out 180ms ease-out forwards; }
+@keyframes loader-overlay-in  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes loader-overlay-out { to   { opacity: 0; } }
+
 .btn-loading { position: relative; color: transparent !important; pointer-events: none; }
 .btn-loading::after {
   content: '';
@@ -165,13 +216,22 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.25; color: var(--clr-t
   margin: auto;
   width: 1em;
   height: 1em;
-  border: 2px solid #fff;
-  border-right-color: transparent;
   border-radius: 50%;
-  animation: spin 0.6s linear infinite;
+  background: conic-gradient(from 0deg, #fff 0deg, #fff 270deg, transparent 270deg, transparent 360deg);
+  -webkit-mask: radial-gradient(circle, transparent calc(50% - 3px), #000 calc(50% - 2px));
+          mask: radial-gradient(circle, transparent calc(50% - 3px), #000 calc(50% - 2px));
+  animation: spin 0.7s linear infinite;
 }
 .btn-secondary.btn-loading::after,
-.btn-ghost.btn-loading::after { border-color: var(--clr-text-secondary); border-right-color: transparent; }
+.btn-ghost.btn-loading::after {
+  background: conic-gradient(
+    from 0deg,
+    var(--clr-accent) 0deg,
+    var(--clr-accent) 270deg,
+    var(--clr-navy)   270deg,
+    var(--clr-navy)   360deg
+  );
+}
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -1228,40 +1288,78 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.25; color: var(--clr-t
   width: 18rem; max-width: 100%;
   aspect-ratio: 1 / 1;
   margin: 0 auto;
-  padding: .5rem;
-  background: var(--clr-bg-subtle);
+  padding: 0;
   border: 1px solid var(--clr-border);
   border-radius: var(--radius-lg);
   overflow: hidden;
+  /* Checker pattern — two shades of muted gray. Reads as "transparent /
+     image area" against any image colour (was a single light surface
+     so light-on-light images vanished). */
+  background-color: #e5e7eb;
+  background-image:
+    linear-gradient(45deg,  #f8fafc 25%, transparent 25%),
+    linear-gradient(-45deg, #f8fafc 25%, transparent 25%),
+    linear-gradient(45deg,  transparent 75%, #f8fafc 75%),
+    linear-gradient(-45deg, transparent 75%, #f8fafc 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
 .media-preview-frame > img {
   display: block;
-  max-width: 100%;
-  max-height: 100%;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
-  border-radius: var(--radius-sm);
 }
-/* Overlay sits on top of the image, fully covering the frame. The mask
-   carves a transparent CIRCLE in the centre — only the cut-away ring
-   keeps the dark tint, so the user sees the kept area in full colour
-   and the discarded area dimmed. */
+/* When the modal is going to crop the picked image to a centred
+   square (avatar / logo), preview should mirror that — show what the
+   user will actually GET, not the whole original. object-fit:cover
+   together with the overlay below makes the cut-away pixels visibly
+   darker so the user can spot framing problems before saving. */
+.media-preview-frame > img.media-preview-cover { object-fit: cover; }
+
+/* Overlay sits on top of the image, fully covering the frame. For the
+   circle / square crop variants the mask carves out the KEPT area so
+   only the discarded pixels keep the dark tint — the user reads the
+   final shape at a glance. */
 .media-crop-overlay {
-  position: absolute; inset: .5rem;          /* match parent padding so cut-out aligns to image edge */
+  position: absolute; inset: 0;
   pointer-events: none;
-  background: rgba(0, 0, 0, .55);
-  border-radius: var(--radius-sm);
+  background: rgba(15, 23, 42, .55);   /* slate-900 / 55% — deeper than before for contrast on light images */
 }
 .media-crop-overlay.crop-circle {
   -webkit-mask: radial-gradient(circle at center, transparent 0 calc(50% - 1px), #000 50%);
           mask: radial-gradient(circle at center, transparent 0 calc(50% - 1px), #000 50%);
+  box-shadow: 0 0 0 2px var(--clr-accent) inset;
+  border-radius: 50%;
 }
-/* Square crop is the natural shape of the frame — the whole overlay
-   would be transparent. Instead just outline the kept area with a
-   thin ring so the user knows what the final shape is. */
 .media-crop-overlay.crop-square {
+  /* Whole frame is the kept area — overlay just outlines it. */
   background: transparent;
   box-shadow: 0 0 0 2px var(--clr-accent) inset;
 }
+
+/* Avatar / org-logo tile hover affordance.
+   The overlay sits over the .avatar element (a perfect circle, border-
+   radius 50%) — match its shape so the dim layer follows the avatar
+   instead of bleeding into a square around it. Same rule applies to
+   the org logo, whose markup uses .profile-org-logo as the wrapper
+   but the inner element is still a round .avatar. */
+.avatar-upload,
+.profile-org-logo { position: relative; cursor: pointer; }
+.avatar-upload .avatar-upload-overlay,
+.profile-org-logo .avatar-upload-overlay {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(15, 23, 42, .45);
+  color: #fff;
+  font-size: 1.5rem;
+  opacity: 0;
+  transition: opacity var(--trans-fast);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.avatar-upload:hover    .avatar-upload-overlay,
+.profile-org-logo:hover .avatar-upload-overlay { opacity: 1; }
 
 /* "Upgrade subscription" CTA. Gold pill — same #e0b94f the chip-owner
    uses, keeps subscription as a brand-coloured CTA. Per spec the

@@ -340,7 +340,6 @@
             <span id="org-head-plan" style="font-weight:700; color:var(--clr-accent);">—</span>
           </p>
           <div class="profile-identity-badges">
-            <span id="org-head-type"   class="badge badge-default">—</span>
             <span id="org-head-active" class="badge badge-default">—</span>
             <span id="org-head-myrole" class="badge badge-default">—</span>
           </div>
@@ -363,11 +362,8 @@
               </span>
             </div>
             <div class="profile-card-body">
-              <div class="profile-row">
-                <span class="profile-row-label" data-i18n="profile.org_type">Тип</span>
-                <!-- Read-only: org type is locked after creation. -->
-                <span class="profile-row-value" id="org-info-type">—</span>
-              </div>
+              <!-- "Тип организации" row removed alongside the column —
+                   customer/contractor now lives on each contract. -->
               <div class="profile-row">
                 <span class="profile-row-label" data-i18n="profile.org_status">Статус</span>
                 <span class="profile-row-value" id="org-info-status">—</span>
@@ -385,9 +381,13 @@
                   </span>
                 </span>
               </div>
-              <div class="profile-row" style="border-bottom:none;">
+              <div class="profile-row">
                 <span class="profile-row-label" data-i18n="profile.org_created_at">Дата создания</span>
                 <span class="profile-row-value" id="org-info-created">—</span>
+              </div>
+              <div class="profile-row" style="border-bottom:none;">
+                <span class="profile-row-label" data-i18n="profile.org_updated_at">Последнее изменение</span>
+                <span class="profile-row-value" id="org-info-updated">—</span>
               </div>
             </div>
           </div>
@@ -737,16 +737,8 @@
           </div>
           <div class="form-error" id="err-invite-contact"><i class="ph ph-warning-circle"></i><span></span></div>
         </div>
-        <div class="form-group">
-          <label class="form-label" for="invite-role">Роль <span class="req">*</span></label>
-          <select id="invite-role" class="form-select">
-            <option value="" disabled selected>Выберите роль</option>
-            <option value="manager"   data-i18n-opt="roles.manager">Менеджер</option>
-            <option value="technician" data-i18n-opt="roles.technician">Техник</option>
-            <option value="employee"  data-i18n-opt="roles.employee">Сотрудник</option>
-          </select>
-          <div class="form-error" id="err-invite-role"><i class="ph ph-warning-circle"></i><span></span></div>
-        </div>
+        <!-- Роль приглашённого всегда employee — выбора нет. Owner не
+             выдаётся через инвайт; передача владения — отдельный сценарий. -->
         <div class="alert alert-error hidden" id="err-invite"><i class="ph ph-warning-circle"></i><span id="err-invite-text"></span></div>
       </div>
     </div>

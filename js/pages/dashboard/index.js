@@ -12,7 +12,6 @@ import { wireMediaAttach }                             from '../../media-attach.
 import {
   statusBadge,
   orgStatusBadge,
-  orgTypeBadge,
   roleBadgeDescriptor,
   renderIconBadge,
   renderRowChip,
@@ -41,6 +40,7 @@ import { wireDetachContact,  openDetachContact  } from './modals/detach-contact.
 import { fmtDate, setAvatar, initials, roleLabel } from './format.js';
 import { renderProfileTab }     from './tabs/profile.js';
 import { populateOrgTab }       from './tabs/organization.js';
+import { attachLoader }         from '../../lib/lazy-loader.js';
 
 // ── Init ──────────────────────────────────────────────────────────
 await initI18n();
@@ -180,6 +180,9 @@ let _userPermissions = {};
 let _orgData         = null;
 
 async function loadProfile() {
+  // Full-page loader: appears only if /api/profile/me takes > 1.5 s,
+  // and once shown stays for at least 1.5 s so it never strobes.
+  const stopLoader = attachLoader({ container: document.body });
   try {
     const resp  = await profile.get();
     const user  = resp.data?.user         ?? resp.data;
@@ -231,11 +234,11 @@ async function loadProfile() {
     if (navItemOrg) navItemOrg.style.display = hasOrg ? '' : 'none';
     if (!hasOrg && currentTab === 'org') switchTab('profile', { updateHash: true });
 
-    // Sidebar Organization section (Members + Your-Org) — appears if
-    // user is at least an approved member; specific items inside have
-    // their own permission filters.
-    const canManage = ['owner', 'manager'].includes(role);
-    q('#org-nav-section').style.display = hasOrg ? '' : 'none';
+    // Sidebar Organization section — приглашает / список заявок на
+    // вступление видны только владельцу. Employee видит только
+    // сами заявки на ремонт, без org-management.
+    const canManage = role === 'owner';
+    q('#org-nav-section').style.display = (hasOrg && canManage) ? '' : 'none';
     q('#nav-item-members').style.display = (hasOrg && canManage) ? '' : 'none';
     q('#no-org-notice')?.classList.toggle('hidden', hasOrg);
 
@@ -251,6 +254,8 @@ async function loadProfile() {
 
   } catch (err) {
     toast(errorMessage(err), 'error');
+  } finally {
+    stopLoader();
   }
 }
 
@@ -275,13 +280,21 @@ wireMediaAttach({
   trigger:     '#btn-change-avatar',
   entityType:  'user',
   confirm:     (mediaFileId) => profile.confirmAvatar(mediaFileId),
+  deleteFn:    ()             => profile.deleteAvatar(),
+  hasExisting: () => !!_userProfile?.avatar?.url,
   onSuccess:   () => {
     toast(getLang() === 'en' ? 'Avatar updated' : 'Фото обновлено', 'ok');
     loadProfile();
   },
   titleKey: 'profile.media_avatar_title',
   hintKey:  'profile.media_avatar_hint',
-  cropPreview: 'circle',         // avatar is rendered as a circle
+  // Crop preview is shown as a square (same green-bordered tile as the
+  // org logo) — the actual avatar element in the UI is still circular,
+  // but the modal frames the kept area as a 1:1 square because that's
+  // what gets stored. Keeps the preview behaviour identical between
+  // avatar and org-logo.
+  cropPreview: 'square',
+  getLimits: () => _orgData?.limits ?? null,
   t, toast, errorMessage,
 });
 
@@ -372,6 +385,8 @@ wireMediaAttach({
   trigger:     '#org-logo-wrap.editable',
   entityType:  'organization',
   confirm:     (mediaFileId) => org.confirmLogo(mediaFileId),
+  deleteFn:    ()             => org.deleteLogo(),
+  hasExisting: () => !!_orgData?.logo?.url,
   onSuccess:   () => {
     toast(getLang() === 'en' ? 'Logo updated' : 'Логотип обновлён', 'ok');
     loadOrgProfile();
@@ -379,6 +394,7 @@ wireMediaAttach({
   titleKey: 'profile.media_logo_title',
   hintKey:  'profile.media_logo_hint',
   cropPreview: 'square',         // org logo is rendered as a square tile
+  getLimits: () => _orgData?.limits ?? null,
   t, toast, errorMessage,
 });
 
@@ -386,6 +402,8 @@ wireMediaAttach({
 // MEMBERS
 // ─────────────────────────────────────────────────────────────────
 async function loadMembers() {
+  const tabEl = q('#tab-members');
+  const stopLoader = tabEl ? attachLoader({ container: tabEl }) : null;
   try {
     const data = await members.listPending();
     const list = data.data || [];
@@ -399,7 +417,7 @@ async function loadMembers() {
         <div class="avatar avatar-sm">${initials(m.full_name || m.contact || '?')}</div>
         <div class="notification-content">
           <p class="notification-text" style="font-weight:500;">${escapeHTML(m.full_name || m.contact || '—')}</p>
-          <p class="notification-time">${roleLabel(m.requested_role)}</p>
+          <p class="notification-time">${roleLabel('employee')}</p>
         </div>
         <div style="display:flex;gap:.5rem;flex-shrink:0;">
           <button class="btn btn-secondary btn-sm btn-approve" data-id="${m.user_id}">${t('members.approve')}</button>
@@ -410,6 +428,7 @@ async function loadMembers() {
     el.querySelectorAll('.btn-approve').forEach(btn => btn.addEventListener('click', () => manageMember(btn.dataset.id, 'approved')));
     el.querySelectorAll('.btn-reject').forEach(btn  => btn.addEventListener('click', () => manageMember(btn.dataset.id, 'rejected')));
   } catch (_) {}
+  finally { stopLoader?.(); }
 }
 
 async function manageMember(userId, action) {
@@ -427,25 +446,21 @@ q('#btn-invite')?.addEventListener('click', () => openModal('invite-modal'));
 
 q('#btn-invite-confirm')?.addEventListener('click', async () => {
   const contact = q('#invite-contact')?.value.trim();
-  const role    = q('#invite-role')?.value;
 
   q('#err-invite-contact')?.classList.remove('show');
-  q('#err-invite-role')?.classList.remove('show');
   q('#err-invite')?.classList.add('hidden');
 
-  let valid = true;
-  if (!contact) { setFieldError('err-invite-contact', t('errors.required')); valid = false; }
-  if (!role)    { setFieldError('err-invite-role',    t('errors.select_role')); valid = false; }
-  if (!valid) return;
+  if (!contact) { setFieldError('err-invite-contact', t('errors.required')); return; }
 
   const btn = q('#btn-invite-confirm');
   setLoading(btn, true);
   try {
-    await members.invite(contact, role);
+    // Все приглашения вступают как employee — outerside the invite flow,
+    // и инвайтить «нового владельца» нельзя. Бэкенд игнорирует second arg.
+    await members.invite(contact);
     closeModal('invite-modal');
     toast(getLang() === 'en' ? 'Invitation sent' : 'Приглашение отправлено', 'ok');
     if (q('#invite-contact')) q('#invite-contact').value = '';
-    if (q('#invite-role'))    q('#invite-role').value    = '';
   } catch (err) {
     const errEl = q('#err-invite');
     if (errEl)  { errEl.classList.remove('hidden'); errEl.classList.add('show'); }

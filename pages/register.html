@@ -78,33 +78,22 @@
         <div class="form-error" id="err-contact"><i class="ph ph-warning-circle"></i><span></span></div>
       </div>
 
-      <!-- Role selector -->
+      <!-- Role selector — two cards: create a new org (owner) vs join an
+           existing one by ID (employee). Granular roles inside the org
+           ("manager", "technician") are gone — responsibility is taken
+           on a per-request basis once the request flow lands. -->
       <div class="form-group">
         <p class="form-label">
           <span data-i18n="auth.register.role_label">Ваша роль в системе</span>
           <span class="req">*</span>
         </p>
-        <div class="role-grid" id="role-grid" role="radiogroup">
+        <div class="role-grid" id="role-grid" role="radiogroup" style="grid-template-columns: 1fr 1fr;">
 
           <label class="role-card" data-role="owner">
             <input type="radio" name="role" value="owner" class="sr-only">
             <div class="role-card-icon"><i class="ph ph-crown-simple"></i></div>
             <div class="role-card-label" data-i18n="auth.register.role_owner_label">Руководитель</div>
             <div class="role-card-desc"  data-i18n="auth.register.role_owner_desc">Создаёт организацию, управляет персоналом</div>
-          </label>
-
-          <label class="role-card" data-role="manager">
-            <input type="radio" name="role" value="manager" class="sr-only">
-            <div class="role-card-icon"><i class="ph ph-briefcase"></i></div>
-            <div class="role-card-label" data-i18n="auth.register.role_manager_label">Менеджер</div>
-            <div class="role-card-desc"  data-i18n="auth.register.role_manager_desc">Координирует заявки и управляет работой</div>
-          </label>
-
-          <label class="role-card" data-role="technician">
-            <input type="radio" name="role" value="technician" class="sr-only">
-            <div class="role-card-icon"><i class="ph ph-wrench"></i></div>
-            <div class="role-card-label" data-i18n="auth.register.role_tech_label">Техник</div>
-            <div class="role-card-desc"  data-i18n="auth.register.role_tech_desc">Выполняет ремонт и техническое обслуживание</div>
           </label>
 
           <label class="role-card" data-role="employee">
@@ -134,38 +123,9 @@
         <div class="form-error" id="err-org-name"><i class="ph ph-warning-circle"></i><span></span></div>
       </div>
 
-      <!-- Org occupation (owner only) — choose customer vs contractor.
-           Same UI pattern as the role-grid above. -->
-      <div class="form-group" id="org-occupation-group" style="display:none;">
-        <p class="form-label">
-          <span data-i18n="auth.register.org_occupation_label">Тип организации</span>
-          <span class="req">*</span>
-        </p>
-        <div class="role-grid" id="occupation-grid" role="radiogroup" style="grid-template-columns: 1fr 1fr;">
-          <label class="role-card" data-occupation="customer">
-            <input type="radio" name="occupation" value="customer" class="sr-only" checked>
-            <div class="role-card-icon"><i class="ph ph-storefront"></i></div>
-            <div class="role-card-label" data-i18n="profile.org_type_customer">Заказчик</div>
-            <div class="role-card-desc"  data-i18n="auth.register.org_occupation_customer_desc">Подаёте и контролируете заявки на ремонт</div>
-          </label>
-          <label class="role-card" data-occupation="contractor">
-            <input type="radio" name="occupation" value="contractor" class="sr-only">
-            <div class="role-card-icon"><i class="ph ph-wrench"></i></div>
-            <div class="role-card-label" data-i18n="profile.org_type_contractor">Подрядчик</div>
-            <div class="role-card-desc"  data-i18n="auth.register.org_occupation_contractor_desc">Принимаете заявки от клиентов и закрываете их</div>
-          </label>
-        </div>
-        <div class="form-error" id="err-occupation"><i class="ph ph-warning-circle"></i><span></span></div>
-        <!-- Reassurance: org type only affects EXTERNAL workflows (contracts
-             with other organisations). The internal request flow inside your
-             own company is identical for both customer and contractor orgs. -->
-        <div class="alert alert-info show" style="display:flex; align-items:flex-start; gap:.6rem; margin-top:.75rem;">
-          <i class="ph ph-info" style="margin-top:.15rem; flex-shrink:0;"></i>
-          <span data-i18n="auth.register.occupation_internal_note">
-            Какой бы тип вы ни выбрали, внутри вашей организации сотрудники всегда смогут создавать и закрывать заявки между собой. Тип влияет только на работу с внешними партнёрами.
-          </span>
-        </div>
-      </div>
+      <!-- "Тип организации" (customer vs contractor) step removed — the
+           customer / contractor role now lives on individual contracts
+           between two organisations, not as an attribute of the org. -->
 
       <!-- Org ID (non-owner) -->
       <div class="form-group" id="org-id-group" style="display:none;">
@@ -179,7 +139,7 @@
             data-i18n-ph="auth.register.org_id_ph"
             placeholder="Например: 42">
         </div>
-        <p class="form-hint" data-i18n="auth.register.org_id_hint">После отправки заявки руководитель организации одобрит её, отклонит или изменит роль.</p>
+        <p class="form-hint" data-i18n="auth.register.org_id_hint">После отправки заявки руководитель организации одобрит её или отклонит.</p>
         <div class="form-error" id="err-org-id"><i class="ph ph-warning-circle"></i><span></span></div>
       </div>
 

@@ -28,22 +28,19 @@ export function orgStatusBadge(isActive) {
     : { key: 'profile.org_status_inactive', chip: 'chip-default', badge: 'badge-default', icon: 'ph-prohibit' };
 }
 
-export function orgTypeBadge(occupation) {
-  return occupation === 'contractor'
-    ? { key: 'profile.org_type_contractor', chip: 'chip-contractor', badge: 'badge-type-contractor', icon: 'ph-wrench' }
-    : { key: 'profile.org_type_customer',   chip: 'chip-customer',   badge: 'badge-type-customer',   icon: 'ph-storefront' };
-}
+// `orgTypeBadge` was removed alongside the organizations.occupation
+// column — the customer / contractor distinction now lives on each
+// contract row between two organisations, not as an attribute of the
+// org itself.
 
 export function roleBadgeDescriptor(role) {
   switch (role) {
-    case 'owner':      return { key: 'roles.owner',      chip: 'chip-owner',      badge: 'badge-role-owner',      icon: 'ph-shield-star' };
-    case 'manager':    return { key: 'roles.manager',    chip: 'chip-manager',    badge: 'badge-role-manager',    icon: 'ph-briefcase' };
-    case 'technician': return { key: 'roles.technician', chip: 'chip-technician', badge: 'badge-role-technician', icon: 'ph-wrench' };
-    case 'employee':   return { key: 'roles.employee',   chip: 'chip-employee',   badge: 'badge-role-employee',   icon: 'ph-user' };
+    case 'owner':    return { key: 'roles.owner',    chip: 'chip-owner',    badge: 'badge-role-owner',    icon: 'ph-shield-star' };
+    case 'employee': return { key: 'roles.employee', chip: 'chip-employee', badge: 'badge-role-employee', icon: 'ph-user' };
     default:
-      // Fallback for null/undefined/unknown roles — show a generic dash
-      // rather than rendering the literal "roles.undefined" key when the
-      // user is logged in but hasn't been approved yet.
+      // Fallback for null/undefined/unknown roles — render a generic dash
+      // rather than the literal "roles.undefined" key for users that are
+      // logged in but haven't been approved by their org yet.
       return { key: 'membership.status_unknown', chip: 'chip-default', badge: 'badge-default', icon: 'ph-user' };
   }
 }

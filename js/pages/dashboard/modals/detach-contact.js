@@ -14,6 +14,7 @@
 import { profile }                from '../../../api.js';
 import { toast, errorMessage }    from '../../../auth.js';
 import { t, getLang }             from '../../../i18n.js';
+import { wireFormGuard }          from '../../../form-guard.js';
 import {
   openModal, closeModal, setLoading,
   setFieldError, clearFieldErrorById,
@@ -25,7 +26,8 @@ let _ctx = {
   openChangeContact:  () => {},
 };
 
-let _type = null;
+let _type  = null;
+let _guard = null;
 
 export function openDetachContact(type) {
   _type = type;
@@ -44,11 +46,24 @@ export function openDetachContact(type) {
   }
   closeModal('change-contact-modal');
   openModal('detach-contact-modal');
+  // Re-evaluate the guard after the inputs are wiped — both fields are
+  // now empty so the red "Открепить" button should grey out (.is-pending).
+  _guard?.refresh();
   setTimeout(() => document.querySelector('#dtc-contact')?.focus(), 80);
 }
 
 export function wireDetachContact(ctx) {
   Object.assign(_ctx, ctx);
+
+  // Form-guard: the destructive "Открепить" button stays grey
+  // (.is-pending) until both the contact text and password are non-empty.
+  _guard = wireFormGuard({
+    button:   '#btn-dtc-submit',
+    required: [
+      { sel: '#dtc-contact',  kind: 'text' },
+      { sel: '#dtc-password', kind: 'text' },
+    ],
+  });
 
   // "Назад" inside the detach modal — return to the change-contact wizard
   // (where the user originally clicked the trash link).

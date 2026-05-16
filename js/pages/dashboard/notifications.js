@@ -9,6 +9,7 @@
 import { notifications as notifsApi } from '../../api.js';
 import { toast, errorMessage }        from '../../auth.js';
 import { t, getLang }                 from '../../i18n.js';
+import { attachLoader }               from '../../lib/lazy-loader.js';
 
 let _notifications = [];
 
@@ -22,6 +23,10 @@ export async function loadNotificationCount() {
 }
 
 export async function loadNotifications() {
+  // Defer the loader to the #notif-list container — same 1.5/1.5 s
+  // behaviour as the rest of the data-bound panels.
+  const listEl = document.querySelector('#notif-list');
+  const stopLoader = listEl ? attachLoader({ container: listEl }) : null;
   try {
     const data = await notifsApi.getAll({ limit: 100 });
     _notifications = data.data || [];
@@ -29,6 +34,7 @@ export async function loadNotifications() {
     renderOverviewNotifs();
     updateNotifBadge(_notifications.filter(n => !n.read_at).length);
   } catch (err) { toast(errorMessage(err), 'error'); }
+  finally { stopLoader?.(); }
 }
 
 // Called by socket handlers in dashboard.js when a new notification

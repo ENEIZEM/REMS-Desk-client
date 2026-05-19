@@ -942,11 +942,12 @@ body[data-sidebar="closed"] .sidebar {
   display: flex;
   align-items: center;
   gap: var(--space-4);
-  /* Vertical 0.75rem (was 1rem) — combined with the trimmed card-header
-     padding-bottom (0.5rem) above, the first-row top gap goes from
-     ~2rem to ~1.25rem. Reads as natural row density, not "buried under
-     the header". */
-  padding: 0.75rem 1.25rem;
+  /* Tighter row: 0.5rem vertical. With the 3-line text stack
+     (name / contact / meta) the row is naturally tall — adding more
+     than 0.5rem of vertical padding makes every row feel "padded
+     twice". The card-header above also trimmed its padding-bottom
+     so the FIRST row sits right under the header text. */
+  padding: 0.5rem 1.25rem;
   border-bottom: 1px solid var(--clr-border);
 }
 .members-list .members-row:last-child { border-bottom: none; }
@@ -1701,45 +1702,56 @@ body[data-sidebar="closed"] .sidebar {
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 
-/* Email — accent teal (idle hover and selected). */
-.role-card[data-contact="email"]:hover {
-  border-color: var(--clr-accent);
-  background: var(--clr-accent-light);
-}
-.role-card[data-contact="email"]:hover .role-card-icon {
-  background: var(--clr-accent-light);
-  color: var(--clr-accent);
-}
-.role-card[data-contact="email"]:has(input[type="radio"]:checked),
-.role-card[data-contact="email"].selected {
-  border-color: var(--clr-accent);
-  background: var(--clr-accent-light);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--clr-accent) 18%, transparent);
-}
-.role-card[data-contact="email"]:has(input[type="radio"]:checked) .role-card-icon,
-.role-card[data-contact="email"].selected .role-card-icon { background: var(--clr-accent); color: #fff; }
-.role-card[data-contact="email"]:has(input[type="radio"]:checked) .role-card-label,
-.role-card[data-contact="email"].selected .role-card-label { color: var(--clr-accent); }
-
-/* Phone — ink-navy (idle hover and selected). */
-.role-card[data-contact="phone"]:hover {
+/* Контакт-карточки (email/phone) — единый нейтральный «navy» вариант для
+   обоих типов: они равнозначны как методы верификации, а разные цвета
+   на email/phone создавали ложную иерархию (email выглядел «главным»).
+   Любые выборки контактов должны идти в .role-grid с grid-template-
+   columns:1fr 1fr — это гарантирует одинаковую ширину карточек. */
+.role-card[data-contact]:hover {
   border-color: var(--clr-navy);
   background: var(--clr-navy-light);
 }
-.role-card[data-contact="phone"]:hover .role-card-icon {
+.role-card[data-contact]:hover .role-card-icon {
   background: var(--clr-navy-light);
   color: var(--clr-navy);
 }
-.role-card[data-contact="phone"]:has(input[type="radio"]:checked),
-.role-card[data-contact="phone"].selected {
+.role-card[data-contact]:has(input[type="radio"]:checked),
+.role-card[data-contact].selected {
   border-color: var(--clr-navy);
   background: var(--clr-navy-light);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--clr-navy) 18%, transparent);
 }
-.role-card[data-contact="phone"]:has(input[type="radio"]:checked) .role-card-icon,
-.role-card[data-contact="phone"].selected .role-card-icon { background: var(--clr-navy); color: #fff; }
-.role-card[data-contact="phone"]:has(input[type="radio"]:checked) .role-card-label,
-.role-card[data-contact="phone"].selected .role-card-label { color: var(--clr-navy); }
+.role-card[data-contact]:has(input[type="radio"]:checked) .role-card-icon,
+.role-card[data-contact].selected .role-card-icon { background: var(--clr-navy); color: #fff; }
+.role-card[data-contact]:has(input[type="radio"]:checked) .role-card-label,
+.role-card[data-contact].selected .role-card-label { color: var(--clr-navy); }
+
+/* Single-contact mode: когда у юзера только 1 верифицированный контакт,
+   мы НЕ хотим показывать «выбор из одного», но и не должны падать на
+   plain-text строку — выглядит хуже карточки. JS-классы:
+     .contact-picker         — общий контейнер
+     .contact-picker--single — выставляется когда показывается одна карточка
+   Карточка центрируется и фиксированной ширины, чтобы не растягивалась
+   на всю ширину модалки. */
+.contact-picker--single {
+  display: flex !important;
+  justify-content: center;
+}
+.contact-picker--single .role-card.contact-card {
+  width: min(20rem, 100%);
+  /* Single-card mode — не интерактивен (выбора нет, контакт фиксирован).
+     Подсветим как уже выбранный, чтобы не казалось «надо нажать». */
+  cursor: default;
+  border-color: var(--clr-navy);
+  background: var(--clr-navy-light);
+}
+.contact-picker--single .role-card.contact-card .role-card-icon {
+  background: var(--clr-navy);
+  color: #fff;
+}
+.contact-picker--single .role-card.contact-card .role-card-label {
+  color: var(--clr-navy);
+}
 
 /* Customer (occupation) — accent teal */
 .role-card[data-occupation="customer"]:has(input[type="radio"]:checked),
@@ -1784,6 +1796,64 @@ body[data-sidebar="closed"] .sidebar {
   box-shadow: 0 0 0 3px rgb(15 207 152 / 0.12);
 }
 .pin-input.filled { border-color: var(--clr-accent); background: var(--clr-accent-light); }
+.pin-input.error {
+  border-color: var(--clr-error);
+  background: var(--clr-error-light);
+  box-shadow: 0 0 0 3px rgb(220 38 38 / 0.10);
+}
+/* type="password" рисует мелкие точки даже при крупном font-size в большинстве
+   шрифтов. Увеличиваем размер и тяжесть символа специально для скрытых
+   PIN-полей — теперь точка видна так же явно, как сама цифра. */
+.pin-input[type="password"] {
+  font-size: 2rem;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+/* ── 21.1 PIN-lock overlay (dashboard.html) ───────────────────── */
+.pin-lock-card {
+  width: min(28rem, 92vw);
+  background: var(--clr-surface);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-xl);
+  padding: 2rem 2rem 1.5rem;
+  box-shadow: 0 20px 60px -20px rgb(0 0 0 / 0.18);
+  text-align: center;
+}
+.pin-lock-icon {
+  width: 4rem; height: 4rem;
+  margin: 0 auto 1rem;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--clr-accent-light);
+  color: var(--clr-accent);
+  font-size: 2rem;
+}
+.pin-lock-title {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--clr-text-primary);
+  margin: 0 0 0.5rem;
+}
+.pin-lock-subtitle {
+  font-size: var(--text-sm);
+  color: var(--clr-text-secondary);
+  margin: 0 0 1.5rem;
+  line-height: 1.45;
+}
+.pin-lock-code { margin-bottom: 1rem; }
+#pin-lock-error { margin-bottom: 1rem; }
+.pin-lock-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 0.5rem;
+}
+.pin-lock-lang {
+  position: fixed;
+  top: 1.5rem;
+  right: 1.5rem;
+  z-index: 100001;
+}
 
 /* ── 22. Code input (6-digit verification) ────────────────────── */
 .code-row   { display: flex; gap: var(--space-2); justify-content: center; }

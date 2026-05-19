@@ -30,6 +30,21 @@
       justify-content: center;
       background: #f8fafc;
     }
+    /* PIN-lock overlay. По умолчанию скрыт, показывается через .show.
+       Inline здесь чтобы overlay был стилизован до парсинга style.css
+       (избегаем «вспышку» голого дашборда между загрузкой и lock'ом). */
+    #pin-lock-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 100000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(248, 250, 252, 0.45);
+      backdrop-filter: blur(14px) saturate(140%);
+      -webkit-backdrop-filter: blur(14px) saturate(140%);
+    }
+    #pin-lock-overlay.show { display: flex; }
   </style>
 </head>
 <body data-sidebar="open">
@@ -43,6 +58,44 @@
      loader first appeared, even on the previous page). -->
 <div id="initial-page-loader" class="loader-overlay loader-overlay--fixed">
   <span class="spinner spinner-lg" aria-label="Loading"></span>
+</div>
+
+<!-- ── PIN-lock overlay ────────────────────────────────────────────
+     Скрыт до тех пор, пока dashboard/index.js не убедится, что вход
+     надо подтвердить PIN'ом (см. lib/pin-gate.js + dashboard/pin-lock.js).
+     Логика: если pin-gate выдал one-shot pass (после login/register) —
+     overlay даже не показывается. Иначе ждёт PIN; «Выйти» отвязывает
+     сессию и возвращает на login. -->
+<div id="pin-lock-overlay" aria-hidden="true">
+  <!-- Lang switcher overlay'я: тот же класс lang-btn, поэтому глобальный
+       click-делегат в i18n.js его подхватит без отдельного wiring'а. -->
+  <div class="lang-switcher pin-lock-lang">
+    <button type="button" class="lang-btn" data-lang="ru">RU</button>
+    <button type="button" class="lang-btn" data-lang="en">EN</button>
+  </div>
+  <div class="pin-lock-card">
+    <div class="pin-lock-icon"><i class="ph-duotone ph-lock-key"></i></div>
+    <h2 class="pin-lock-title" data-i18n="pin_lock.title">Подтвердите вход</h2>
+    <p class="pin-lock-subtitle" data-i18n="pin_lock.subtitle">Введите 6-значный PIN, чтобы продолжить работу.</p>
+    <div class="pin-row pin-lock-code">
+      <input type="password" inputmode="numeric" autocomplete="one-time-code" pattern="\d*" class="pin-input pin-lock-input" maxlength="1" aria-label="PIN 1" />
+      <input type="password" inputmode="numeric" autocomplete="one-time-code" pattern="\d*" class="pin-input pin-lock-input" maxlength="1" aria-label="PIN 2" />
+      <input type="password" inputmode="numeric" autocomplete="one-time-code" pattern="\d*" class="pin-input pin-lock-input" maxlength="1" aria-label="PIN 3" />
+      <input type="password" inputmode="numeric" autocomplete="one-time-code" pattern="\d*" class="pin-input pin-lock-input" maxlength="1" aria-label="PIN 4" />
+      <input type="password" inputmode="numeric" autocomplete="one-time-code" pattern="\d*" class="pin-input pin-lock-input" maxlength="1" aria-label="PIN 5" />
+      <input type="password" inputmode="numeric" autocomplete="one-time-code" pattern="\d*" class="pin-input pin-lock-input" maxlength="1" aria-label="PIN 6" />
+    </div>
+    <div id="pin-lock-error" class="alert alert-danger hidden" role="alert">
+      <i class="ph ph-warning"></i>
+      <span id="pin-lock-error-text"></span>
+    </div>
+    <div class="pin-lock-actions">
+      <button id="pin-lock-logout" type="button" class="btn btn-ghost">
+        <i class="ph ph-sign-out"></i>
+        <span data-i18n="pin_lock.logout">Выйти из аккаунта</span>
+      </button>
+    </div>
+  </div>
 </div>
 
 <!-- ── Sidebar toggle (floating square, top-left) ──────────────────
@@ -323,9 +376,10 @@
       <div class="card" id="pending-section" style="margin-bottom:1.5rem; display:none; padding:0; overflow:hidden;">
         <!-- padding-bottom trimmed to 0.5rem so the visible gap between
              the header text and the first row's content stays compact
-             (row brings its own padding-top). Without this trim the
-             first row felt visually "buried" by ~2rem of top space. -->
-        <div class="card-header" style="padding: 1rem 1.25rem 0.5rem;">
+             (row brings its own padding-top). margin-bottom:0 убирает
+             дефолтный 1.5rem от .card-header — иначе первая строка
+             отъезжала вниз на ~2rem больше, чем последующие. -->
+        <div class="card-header" style="padding: 1rem 1.25rem 0.5rem; margin-bottom: 0;">
           <h2 class="card-title" data-i18n="members.pending">Ожидают одобрения</h2>
         </div>
         <div id="pending-list" class="members-list"></div>
@@ -336,7 +390,7 @@
            организации с <date>". Owner's row is pinned first; rest
            sorted by name alphabetically. -->
       <div class="card" id="approved-section" style="padding:0; overflow:hidden;">
-        <div class="card-header" style="padding: 1rem 1.25rem 0.5rem;">
+        <div class="card-header" style="padding: 1rem 1.25rem 0.5rem; margin-bottom: 0;">
           <h2 class="card-title" data-i18n="members.approved">Сотрудники организации</h2>
           <span id="approved-count" class="badge badge-default"></span>
         </div>
@@ -885,8 +939,11 @@
             </p>
           </div>
 
-          <div class="form-group">
-            <label class="form-label" for="chp-current" data-i18n="profile.current_password">Текущий пароль</label>
+          <div class="form-group" id="chp-current-group">
+            <label class="form-label" for="chp-current" style="display:flex; align-items:center; justify-content:space-between;">
+              <span data-i18n="profile.current_password">Текущий пароль</span>
+              <a href="#" id="chp-forgot-link" style="font-size:var(--text-xs); font-weight:600; color:var(--clr-text-secondary);" data-i18n="profile.forgot_password">Забыли пароль?</a>
+            </label>
             <div class="input-wrap">
               <i class="ph ph-lock-simple input-icon"></i>
               <input id="chp-current" type="password" class="form-input" autocomplete="current-password">
@@ -895,6 +952,14 @@
               </button>
             </div>
             <div class="form-error" id="err-chp-current"><i class="ph ph-warning-circle"></i><span></span></div>
+          </div>
+          <!-- Notice shown in forgot-mode вместо current-password field. -->
+          <div id="chp-forgot-notice" class="alert alert-info hidden" role="status" style="display:none; align-items:center; gap:.6rem;">
+            <i class="ph ph-info" style="flex-shrink:0;"></i>
+            <span style="flex:1;">
+              <span data-i18n="profile.forgot_pwd_notice">Подтвердите личность кодом — новый пароль зададите на последнем шаге.</span>
+              <a href="#" id="chp-remember-link" style="font-weight:600; margin-left:.5rem;" data-i18n="profile.remember_password">Помню пароль</a>
+            </span>
           </div>
         </div>
       </div>
@@ -1015,44 +1080,110 @@
     </div>
     <div class="modal-body">
       <div style="display:flex; flex-direction:column; gap:1.25rem;">
+        <!-- Proof: либо «текущий PIN», либо step-up через email/SMS код.
+             Переключается линком «Не помню PIN». -->
         <div id="chpin-current-group">
-          <p class="form-label" style="margin-bottom:.65rem;" data-i18n="profile.current_pin">Текущий PIN</p>
+          <p class="form-label" style="margin-bottom:.65rem; display:flex; align-items:center; justify-content:space-between;">
+            <span data-i18n="profile.current_pin">Текущий PIN</span>
+            <a href="#" id="chpin-forgot-link" style="font-size:var(--text-xs); font-weight:600; color:var(--clr-text-secondary);" data-i18n="profile.forgot_pin">Не помню PIN</a>
+          </p>
           <div class="pin-row" id="chpin-current">
-            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
-            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
-            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
-            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
-            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
-            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="password" inputmode="numeric" pattern="\d*" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="password" inputmode="numeric" pattern="\d*" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="password" inputmode="numeric" pattern="\d*" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="password" inputmode="numeric" pattern="\d*" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="password" inputmode="numeric" pattern="\d*" maxlength="1" autocomplete="off">
+            <input class="pin-input" type="password" inputmode="numeric" pattern="\d*" maxlength="1" autocomplete="off">
           </div>
         </div>
-        <div>
-          <p class="form-label" style="margin-bottom:.65rem;" data-i18n="profile.new_pin">Новый PIN</p>
-          <div class="pin-row" id="chpin-new">
-            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
-            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
-            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
-            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
-            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
-            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+
+        <!-- Step-up proof: выбор контакта + 6-значный код. Скрыт по умолчанию. -->
+        <div id="chpin-stepup-group" class="hidden" style="display:none; flex-direction:column; gap:.75rem;">
+          <p class="form-label" style="margin-bottom:.25rem; display:flex; align-items:center; justify-content:space-between;">
+            <span data-i18n="profile.identity_verification">Подтверждение личности</span>
+            <a href="#" id="chpin-use-pin-link" style="font-size:var(--text-xs); font-weight:600; color:var(--clr-text-secondary);" data-i18n="profile.use_current_pin">Помню PIN</a>
+          </p>
+          <div id="chpin-contact-choice" class="role-grid" role="radiogroup" style="display:none; grid-template-columns:1fr 1fr;">
+            <label class="role-card contact-card" data-contact="email">
+              <input type="radio" name="chpin-contact" value="email" class="sr-only">
+              <div class="role-card-icon"><i class="ph ph-envelope"></i></div>
+              <div class="contact-card-text">
+                <div class="role-card-label" data-i18n="profile.email">Email</div>
+                <div class="role-card-desc" id="chpin-contact-email-label">—</div>
+              </div>
+            </label>
+            <label class="role-card contact-card" data-contact="phone">
+              <input type="radio" name="chpin-contact" value="phone" class="sr-only">
+              <div class="role-card-icon"><i class="ph ph-device-mobile"></i></div>
+              <div class="contact-card-text">
+                <div class="role-card-label" data-i18n="profile.phone">Телефон</div>
+                <div class="role-card-desc" id="chpin-contact-phone-label">—</div>
+              </div>
+            </label>
+          </div>
+          <p id="chpin-contact-single" style="font-size:var(--text-sm); color:var(--clr-text-secondary); margin:0;">
+            <span data-i18n="profile.change_pwd_code_target">Код будет отправлен на</span>
+            <strong id="chpin-contact-single-target" style="color:var(--clr-text-primary);">—</strong>
+          </p>
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-chpin-send-code" style="align-self:flex-start;">
+            <i class="ph ph-paper-plane-tilt"></i>
+            <span data-i18n="auth.forgot.send_code">Отправить код</span>
+          </button>
+          <div id="chpin-code-block" class="hidden">
+            <p class="form-label" style="justify-content:center; margin:.5rem 0;" data-i18n="auth.forgot.code_label">Код подтверждения</p>
+            <div class="code-row">
+              <input class="code-input chpin-code-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+              <input class="code-input chpin-code-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+              <input class="code-input chpin-code-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+              <input class="code-input chpin-code-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+              <input class="code-input chpin-code-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+              <input class="code-input chpin-code-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+            </div>
+            <div style="text-align:center; margin-top:.5rem; font-size:var(--text-sm); color:var(--clr-text-secondary);">
+              <span id="chpin-resend-wait" class="hidden">
+                <span data-i18n="auth.register.code_resend_wait">Повторно через</span>
+                <strong id="chpin-resend-countdown">60</strong>с
+              </span>
+              <button type="button" id="btn-chpin-resend" class="btn btn-ghost btn-sm" style="display:none;">
+                <i class="ph ph-arrow-clockwise"></i>
+                <span data-i18n="auth.forgot.resend">Отправить повторно</span>
+              </button>
+            </div>
           </div>
         </div>
-        <div>
-          <p class="form-label" style="margin-bottom:.65rem;" data-i18n="profile.confirm_pin">Подтвердите новый PIN</p>
-          <div class="pin-row" id="chpin-confirm">
-            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
-            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
-            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
-            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
-            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
-            <input class="pin-input" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+        <!-- Шаг 2 — новый PIN. Скрыт пока юзер не подтвердит личность
+             (current PIN или код) и не нажмёт «Далее». -->
+        <div id="chpin-step-2" class="hidden" style="display:none; flex-direction:column; gap:1.25rem;">
+          <div>
+            <p class="form-label" style="margin-bottom:.65rem;" data-i18n="profile.new_pin">Новый PIN</p>
+            <div class="pin-row" id="chpin-new">
+              <input class="pin-input" type="password" inputmode="numeric" pattern="\d*" maxlength="1" autocomplete="off">
+              <input class="pin-input" type="password" inputmode="numeric" pattern="\d*" maxlength="1" autocomplete="off">
+              <input class="pin-input" type="password" inputmode="numeric" pattern="\d*" maxlength="1" autocomplete="off">
+              <input class="pin-input" type="password" inputmode="numeric" pattern="\d*" maxlength="1" autocomplete="off">
+              <input class="pin-input" type="password" inputmode="numeric" pattern="\d*" maxlength="1" autocomplete="off">
+              <input class="pin-input" type="password" inputmode="numeric" pattern="\d*" maxlength="1" autocomplete="off">
+            </div>
+          </div>
+          <div>
+            <p class="form-label" style="margin-bottom:.65rem;" data-i18n="profile.confirm_pin">Подтвердите новый PIN</p>
+            <div class="pin-row" id="chpin-confirm">
+              <input class="pin-input" type="password" inputmode="numeric" pattern="\d*" maxlength="1" autocomplete="off">
+              <input class="pin-input" type="password" inputmode="numeric" pattern="\d*" maxlength="1" autocomplete="off">
+              <input class="pin-input" type="password" inputmode="numeric" pattern="\d*" maxlength="1" autocomplete="off">
+              <input class="pin-input" type="password" inputmode="numeric" pattern="\d*" maxlength="1" autocomplete="off">
+              <input class="pin-input" type="password" inputmode="numeric" pattern="\d*" maxlength="1" autocomplete="off">
+              <input class="pin-input" type="password" inputmode="numeric" pattern="\d*" maxlength="1" autocomplete="off">
+            </div>
           </div>
         </div>
         <div class="alert alert-error" id="err-chpin"><i class="ph ph-warning-circle"></i><span id="err-chpin-text"></span></div>
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-primary" id="btn-save-pin" data-i18n="common.save">Сохранить</button>
+      <button class="btn btn-primary"   id="btn-chpin-next" data-i18n="common.next">Далее</button>
+      <button class="btn btn-primary"   id="btn-save-pin"   data-i18n="common.save" style="display:none;">Сохранить</button>
+      <button class="btn btn-secondary" id="btn-chpin-back" data-i18n="common.back" style="display:none;">Назад</button>
       <button class="btn btn-secondary" data-close-modal="change-pin-modal" data-i18n="common.cancel">Отмена</button>
     </div>
   </div>

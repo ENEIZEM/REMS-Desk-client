@@ -44,6 +44,8 @@ import { renderProfileTab }     from './tabs/profile.js';
 import { populateOrgTab }       from './tabs/organization.js';
 import { attachLoader }         from '../../lib/lazy-loader.js';
 import { hidePageLoader }       from '../../lib/page-loader.js';
+import { consumePinPass }       from '../../lib/pin-gate.js';
+import { requirePinUnlock }     from './pin-lock.js';
 
 // Hide the pre-paint navigation overlay the INSTANT JS starts running.
 // Per the revised timing spec ("page started rendering" = drop the
@@ -55,6 +57,19 @@ hidePageLoader();
 // ── Init ──────────────────────────────────────────────────────────
 await initI18n();
 if (!requireAuth()) throw new Error('not logged in');
+
+// ── PIN gate ──────────────────────────────────────────────────────
+// JWT живёт 30 дней в localStorage. Чтобы перезагрузка страницы (или
+// открытие новой вкладки на этом же домене) не давала тихий доступ к
+// дашборду — между загрузкой и стартом приложения требуем PIN.
+//
+// Исключение: вход только что произошёл (login/register) — там юзер
+// уже ввёл PIN или только что его задал. Эти эндпоинты выставляют
+// one-shot флаг через grantPinPass(); consumePinPass() читает + удаляет
+// его. Если флага нет — показываем overlay и ждём verifyPin.
+if (!consumePinPass()) {
+  await requirePinUnlock();
+}
 
 // ─────────────────────────────────────────────────────────────────
 // TAB NAVIGATION
@@ -387,7 +402,7 @@ wireMediaAttach({
   deleteFn:    ()             => profile.deleteAvatar(),
   hasExisting: () => !!_userProfile?.avatar?.url,
   onSuccess:   () => {
-    toast(getLang() === 'en' ? 'Avatar updated' : 'Фото обновлено', 'ok');
+    toast(t('toasts.avatar_updated'), 'ok');
     loadProfile();
   },
   titleKey: 'profile.media_avatar_title',
@@ -437,8 +452,9 @@ wireChangePassword({
 });
 
 wireChangePin({
-  getUserProfile: () => _userProfile,
-  refresh:        () => loadProfile(),
+  getUserProfile:        () => _userProfile,
+  getAvailableContacts:  () => _availableContacts,
+  refresh:               () => loadProfile(),
 });
 
 // "Upgrade subscription" — coming-soon toast
@@ -492,7 +508,7 @@ wireMediaAttach({
   deleteFn:    ()             => org.deleteLogo(),
   hasExisting: () => !!_orgData?.logo?.url,
   onSuccess:   () => {
-    toast(getLang() === 'en' ? 'Logo updated' : 'Логотип обновлён', 'ok');
+    toast(t('toasts.logo_updated'), 'ok');
     loadOrgProfile();
   },
   titleKey: 'profile.media_logo_title',
@@ -719,7 +735,7 @@ q('#btn-invite-confirm')?.addEventListener('click', async () => {
     // и инвайтить «нового владельца» нельзя. Бэкенд игнорирует second arg.
     await members.invite(contact);
     closeModal('invite-modal');
-    toast(getLang() === 'en' ? 'Invitation sent' : 'Приглашение отправлено', 'ok');
+    toast(t('toasts.invitation_sent'), 'ok');
     if (q('#invite-contact')) q('#invite-contact').value = '';
   } catch (err) {
     const errEl = q('#err-invite');
@@ -732,10 +748,18 @@ q('#btn-invite-confirm')?.addEventListener('click', async () => {
 // ─────────────────────────────────────────────────────────────────
 // SOCKET
 // ─────────────────────────────────────────────────────────────────
-function initSocketConn() {
+async function initSocketConn() {
   try {
-    const socket = connectSocket();
+    const socket = await connectSocket();
     if (!socket) return;
+
+    // Сервер уведомляет о невалидной сессии через connect_error с кодом
+    // DEVICE_MISMATCH / SESSION_REVOKED / SESSION_EXPIRED. Без подписчика
+    // пользователь оставался залогинен с протухшим токеном; logout() чистит
+    // токен, отключает socket и редиректит на login.
+    socketOn('auth:error', () => {
+      logout();
+    });
 
     // Per-user push. addNotification() normalises camelCase ↔ snake_case
     // internally AND plays the sound — we just feed it the raw socket
@@ -778,8 +802,21 @@ function initSocketConn() {
 
     // Org-wide push — no toast (it can flood when many events fire);
     // the bell badge + list refresh are enough signal.
+    // Если открыта вкладка участников и пришло событие о смене состава
+    // (join_request от соискателя, join_accepted/rejected от владельца) —
+    // перерисовываем список, иначе owner не увидит новых заявителей пока
+    // не переключится на другой таб и обратно.
+    const MEMBERS_REFRESH_TYPES = new Set([
+      'join_request',
+      'join_accepted',
+      'join_rejected',
+      'join_accepted_alt_role',
+    ]);
     socketOn('org:notification', (payload) => {
       addNotification(payload);
+      if (currentTab === 'members' && MEMBERS_REFRESH_TYPES.has(payload?.type)) {
+        loadMembers().catch(() => {});
+      }
     });
   } catch (_) {}
 }
@@ -816,7 +853,7 @@ onLangChange(() => {
 // BOOT
 // ─────────────────────────────────────────────────────────────────
 loadProfile();
-initSocketConn();
+initSocketConn().catch(() => {});
 
 // ─────────────────────────────────────────────────────────────────
 // UTILS

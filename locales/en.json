@@ -123,6 +123,36 @@
       "pin_back":       "Sign in with password",
       "error_empty":    "Please fill in email/phone and password"
     },
+    "forgot": {
+      "link":                  "Forgot password?",
+      "title":                 "Reset password",
+      "subtitle":              "Verify your contact with a code and set a new password",
+      "subtitle_contact":      "Enter the email or phone linked to your account.",
+      "contact_label":         "Account contact",
+      "contact_hint":          "We'll send a 6-digit code to this address/number.",
+      "send_code":             "Send code",
+      "back_to_login":         "Back to sign-in",
+      "code_sent":             "Code sent to",
+      "code_hint":             "If this contact is registered, a code was sent to",
+      "code_hint_below":       "Enter the 6-digit code from the message",
+      "code_label":            "Verification code",
+      "resend":                "Send again",
+      "resend_wait":           "Wait",
+      "resend_wait_label":     "Resend in",
+      "new_password":          "New password",
+      "new_password_confirm":  "Repeat new password",
+      "submit":                "Change password",
+      "success_title":         "Password changed",
+      "success_subtitle":      "Sign in with the new password — all your sessions have been ended.",
+      "success_btn":           "Sign in with new password",
+      "success_toast":         "Password changed, sign in with the new one",
+      "pin_link":              "Forgot PIN?",
+      "pin_title":             "Reset PIN",
+      "pin_subtitle":          "Verify your contact with a code and set a new PIN",
+      "new_pin":               "New PIN (6 digits)",
+      "new_pin_confirm":       "Repeat new PIN",
+      "pin_success_toast":     "PIN changed, sign in with the new PIN"
+    },
     "register": {
       "title":       "Register",
       "subtitle":    "Create your account",
@@ -220,7 +250,8 @@
       "pin_invalid_with_attempts":  "Invalid PIN code. Attempts left: {n}",
       "pin_locked":                 "Too many wrong attempts, try later",
       "pin_locked_with_timer":      "Too many wrong attempts. Try again in {time}",
-      "pin_not_set":                "PIN code is not set"
+      "pin_not_set":                "PIN code is not set",
+      "contact_not_registered":     "This email or phone is not registered"
     },
     "validation": {
       "missing_fields":           "Please fill in all required fields",
@@ -232,6 +263,8 @@
       "invalid_id":               "Invalid identifier",
       "invalid_json":             "Invalid JSON payload",
       "invalid_organization_name":"Invalid organisation name",
+      "invalid_full_name":        "Invalid name",
+      "invalid_department":       "Invalid department name",
       "duplicate_data":           "Such data already exists",
       "password_too_short":       "Password must be at least 8 characters",
       "password_no_uppercase":    "Password must contain an uppercase letter",
@@ -381,7 +414,7 @@
     "change_pwd_enter_code":      "Enter the 6-digit code",
     "change_pwd_code_sent":       "Code sent",
     "change_pwd_need_verification":"Please verify your identity with the code first.",
-    "change_pwd_session_warning": "Changing the password will sign you out of all other devices. This session stays active.",
+    "change_pwd_session_warning": "Changing the password will sign you out of every session — including this one. You'll need to sign in again with the new password.",
     "change_contact_step1_title": "Confirm current contact",
     "change_contact_step1_hint":  "Enter your current contact in full — we need to make sure you know it.",
     "change_contact_step2_title": "New contact",
@@ -412,6 +445,12 @@
     "current_pin":     "Current PIN",
     "new_pin":         "New PIN",
     "confirm_pin":     "Confirm new PIN",
+    "forgot_pin":      "Forgot PIN",
+    "use_current_pin": "I remember PIN",
+    "identity_verification": "Identity verification",
+    "forgot_password":   "Forgot password?",
+    "remember_password": "I remember password",
+    "forgot_pwd_notice": "Verify with a code — set the new password on the final step.",
     "never":           "Never",
     "sessions":        "Active sessions",
     "sessions_loading":"Loading…",
@@ -581,5 +620,19 @@
     "yes":     "Yes",
     "no":      "No",
     "or":      "or"
+  },
+  "toasts": {
+    "avatar_updated":      "Avatar updated",
+    "logo_updated":        "Logo updated",
+    "invitation_sent":     "Invitation sent",
+    "all_marked_as_read":  "All marked as read",
+    "contact_saved":       "Contact saved",
+    "contact_detached":    "Contact detached",
+    "pin_updated":         "PIN updated"
+  },
+  "pin_lock": {
+    "title":    "Confirm it's you",
+    "subtitle": "Enter your 6-digit PIN to continue.",
+    "logout":   "Log out"
   }
 }

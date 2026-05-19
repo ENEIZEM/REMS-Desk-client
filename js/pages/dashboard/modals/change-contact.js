@@ -186,7 +186,7 @@ async function chcNext() {
         ? await profile.changeEmail({ new_email: _newValue, verification_code: code })
         : await profile.changePhone({ new_phone: _newValue, verification_code: code });
       closeModal('change-contact-modal');
-      toast(getLang() === 'en' ? 'Contact saved' : 'Контакт сохранён', 'ok');
+      toast(t('toasts.contact_saved'), 'ok');
       _ctx.refresh();
     } catch (err) {
       showAlertText('err-chc', 'err-chc-text', errorMessage(err));

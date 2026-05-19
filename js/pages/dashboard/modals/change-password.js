@@ -10,7 +10,7 @@
            success — current session keeps working.
    ═══════════════════════════════════════════════════════════════ */
 
-import { profile }                       from '../../../api.js';
+import { profile, auth }                 from '../../../api.js';
 import { logout, toast, errorMessage }   from '../../../auth.js';
 import { t, getLang }                    from '../../../i18n.js';
 import { wireFormGuard }                 from '../../../form-guard.js';
@@ -34,6 +34,26 @@ let _oldPassword   = '';
 let _code          = '';        // captured from step 2
 let _guard         = null;
 let _codeCtl       = null;     // createCodeInput(...) controller
+let _forgotMode    = false;    // true → skip current_password, use reset-password endpoint
+
+// Switch UI between «I remember the password» (default) и forgot-mode.
+function setForgotMode(on) {
+  _forgotMode = !!on;
+  const curGroup    = document.querySelector('#chp-current-group');
+  const forgotNote  = document.querySelector('#chp-forgot-notice');
+  if (curGroup)   curGroup.style.display   = on ? 'none' : '';
+  if (forgotNote) {
+    forgotNote.style.display = on ? 'flex' : 'none';
+    forgotNote.classList.toggle('hidden', !on);
+  }
+  // Сбрасываем поле и ошибку, чтобы при возврате не остался застрявший error.
+  const curInput = document.querySelector('#chp-current');
+  if (curInput) curInput.value = '';
+  clearFieldErrorById('err-chp-current');
+  hideAlertById('err-chp');
+  _oldPassword = '';
+  _guard?.refresh();
+}
 
 // ── Step helpers ────────────────────────────────────────────────
 function setStep(n) {
@@ -145,33 +165,48 @@ function openChangePwdModal() {
   _code         = '';
   _codeCtl?.reset();
 
-  // Populate the contact picker / single-target label.
+  // Populate the contact picker. Используем единый visual: всегда
+  // .role-grid с .role-card. Если у юзера 1 контакт — скрываем неподдер-
+  // живаемую карточку и добавляем contact-picker--single (стиль —
+  // зафиксированная ширина + locked-selected look). Если 2 — обычный
+  // radio-group, обе одинаковой ширины.
   const available = _ctx.getAvailableContacts();
-  const choice = document.querySelector('#chp-contact-choice');
-  const single = document.querySelector('#chp-contact-single');
-  const emailC = available.find(c => c.type === 'email');
-  const phoneC = available.find(c => c.type === 'phone');
-  const both   = !!emailC && !!phoneC;
+  const choice    = document.querySelector('#chp-contact-choice');
+  const single    = document.querySelector('#chp-contact-single');
+  const emailC    = available.find(c => c.type === 'email');
+  const phoneC    = available.find(c => c.type === 'phone');
+  const both      = !!emailC && !!phoneC;
+  const emailCard = document.querySelector('#chp-contact-email-card');
+  const phoneCard = document.querySelector('#chp-contact-phone-card');
+
+  // Legacy single-label всегда прячем — мы теперь рисуем карточку.
+  if (single) single.style.display = 'none';
+  if (choice) {
+    choice.style.display = 'grid';
+    choice.classList.toggle('contact-picker--single', !both);
+  }
+  if (emailC) document.querySelector('#chp-contact-email-label').textContent = emailC.masked;
+  if (phoneC) document.querySelector('#chp-contact-phone-label').textContent = phoneC.masked;
 
   if (both) {
-    if (choice) choice.style.display = '';
-    if (single) single.style.display = 'none';
-    document.querySelector('#chp-contact-email-label').textContent = emailC.masked;
-    document.querySelector('#chp-contact-phone-label').textContent = phoneC.masked;
+    if (emailCard) emailCard.style.display = '';
+    if (phoneCard) phoneCard.style.display = '';
     document.querySelectorAll('#chp-contact-choice input[name="chp-contact"]').forEach(r => { r.checked = false; });
     document.querySelectorAll('#chp-contact-choice .role-card').forEach(c => c.classList.remove('selected'));
   } else if (emailC || phoneC) {
-    if (choice) choice.style.display = 'none';
-    if (single) single.style.display = '';
-    const entry = emailC || phoneC;
-    document.querySelector('#chp-contact-single-target').textContent = entry.masked;
+    const entry  = emailC || phoneC;
+    const keepEm = entry.type === 'email';
+    if (emailCard) emailCard.style.display = keepEm  ? '' : 'none';
+    if (phoneCard) phoneCard.style.display = keepEm  ? 'none' : '';
     selectContact(entry);
   } else {
-    // Edge case: no verified contacts (shouldn't happen in practice).
+    // No verified contacts — спрячем picker полностью.
     if (choice) choice.style.display = 'none';
-    if (single) single.style.display = 'none';
   }
 
+  // Открываем всегда в режиме «помню пароль» — пользователь сам нажмёт
+  // «Забыли пароль?», если нужно.
+  setForgotMode(false);
   setStep(1);
   openModal('change-pwd-modal');
   setTimeout(() => document.querySelector('#chp-current')?.focus(), 80);
@@ -182,28 +217,35 @@ async function chpNext() {
   hideAlertById('err-chp');
 
   if (_step === 1) {
-    const cur = document.querySelector('#chp-current')?.value ?? '';
-    if (!cur) { setFieldError('err-chp-current', t('errors.required')); return; }
     if (!_verifyTarget) {
       showAlertText('err-chp', 'err-chp-text', t('errors.required'));
       return;
     }
-    _oldPassword = cur;
-    // Send sendCode WITH current_password attached so the backend can
-    // reject the request early if the password is wrong — otherwise the
-    // user would walk through code entry only to be denied at the final
-    // save (bad UX, plus it tips off attackers about which password to
-    // try next without spending an email/SMS).
+    const cur = document.querySelector('#chp-current')?.value ?? '';
+    // В forgot-mode current password не запрашиваем — личность подтверждается
+    // только кодом. На бэкенд пойдёт reset-password с verification code.
+    if (!_forgotMode) {
+      if (!cur) { setFieldError('err-chp-current', t('errors.required')); return; }
+      _oldPassword = cur;
+    } else {
+      _oldPassword = '';
+    }
     const btn = document.querySelector('#btn-chp-next');
     setLoading(btn, true);
     try {
-      const resp = await profile.sendCode({
-        target:           _verifyTarget,
-        type:             _verifyType,
-        purpose:          'change_password',
-        current_password: cur,
-      });
-      // Update the "Код отправлен на …" line on step 2.
+      const sendPayload = {
+        target:  _verifyTarget,
+        type:    _verifyType,
+        // В forgot-mode purpose='reset_password' (правильный код для
+        // последующего auth.resetPassword), иначе обычный 'change_password'.
+        purpose: _forgotMode ? 'reset_password' : 'change_password',
+        // current_password — eager check сервера: если ошибочный, бэк
+        // вернёт invalid_credentials БЕЗ траты email/SMS. В forgot-mode не шлём.
+        ...(!_forgotMode && { current_password: cur }),
+      };
+      const resp = _forgotMode
+        ? await auth.sendCode(_verifyTarget, 'reset_password')
+        : await profile.sendCode(sendPayload);
       const targetLabel =
         (_ctx.getAvailableContacts().find(c => c.value === _verifyTarget)?.masked) || _verifyTarget;
       document.querySelector('#chp-code-target').textContent = targetLabel;
@@ -214,9 +256,6 @@ async function chpNext() {
       setTimeout(() => _codeCtl?.focus(), 80);
       toast(t('profile.change_pwd_code_sent') || 'Код отправлен', 'ok');
     } catch (err) {
-      // Pin the message under the password field if it's a credentials
-      // failure (server returns errors.auth.invalid_credentials); show
-      // the generic alert otherwise.
       if (err?.error_key === 'errors.auth.invalid_credentials') {
         setFieldError('err-chp-current', errorMessage(err));
       } else {
@@ -232,6 +271,26 @@ async function chpNext() {
     const code = _codeCtl?.read() ?? '';
     if (code.length !== 6) {
       showAlertText('err-chp', 'err-chp-text', t('errors.pin_length'));
+      return;
+    }
+    // В forgot-mode проверяем код сразу через reset-verify-code endpoint —
+    // он не consumed-ит код, но даёт чёткое «code_invalid» при wrong code
+    // (бэк инкрементит failed_attempts, чтобы bruteforce был bounded).
+    // В обычном change-password flow код проверится только на финальном
+    // submit; здесь сохраняем старое поведение, чтобы не множить запросы.
+    if (_forgotMode) {
+      const btn = document.querySelector('#btn-chp-next');
+      setLoading(btn, true);
+      try {
+        await auth.resetVerifyCode(_verifyTarget, code);
+        _code = code;
+        setStep(3);
+        setTimeout(() => document.querySelector('#chp-new')?.focus(), 80);
+      } catch (err) {
+        showAlertText('err-chp', 'err-chp-text', errorMessage(err));
+      } finally {
+        setLoading(btn, false);
+      }
       return;
     }
     _code = code;
@@ -261,16 +320,24 @@ async function chpNext() {
     const btn = document.querySelector('#btn-chp-next');
     setLoading(btn, true);
     try {
-      await profile.changePassword({
-        old_password:        _oldPassword,
-        new_password:        newPw,
-        new_password_confirm: newPw2,
-        verification_code:   _code,
-        verification_target: _verifyTarget,
-      });
+      if (_forgotMode) {
+        // Forgot-mode → auth.resetPassword: бэк проверит код, апдейтит
+        // password_hash, ревокает ВСЕ сессии (включая текущую).
+        await auth.resetPassword({
+          target: _verifyTarget, code: _code,
+          new_password: newPw, new_password_confirm: newPw2,
+        });
+      } else {
+        await profile.changePassword({
+          old_password:        _oldPassword,
+          new_password:        newPw,
+          new_password_confirm: newPw2,
+          verification_code:   _code,
+          verification_target: _verifyTarget,
+        });
+      }
       // Land on the success screen — closing the modal from here drops the
-      // local token so the user signs in with the new password (their other
-      // sessions were revoked server-side already).
+      // local token so the user signs in with the new password.
       setStep(4);
     } catch (err) {
       showAlertText('err-chp', 'err-chp-text', errorMessage(err));
@@ -308,8 +375,10 @@ export function wireChangePassword(ctx) {
               '.chp-code-input', '#chp-contact-choice input[name="chp-contact"]'],
       fn: () => {
         if (_step === 1) {
-          return !!document.querySelector('#chp-current')?.value.trim()
-              && !!_verifyTarget;
+          if (!_verifyTarget) return false;
+          // В forgot-mode current_password не нужен.
+          if (_forgotMode) return true;
+          return !!document.querySelector('#chp-current')?.value.trim();
         }
         if (_step === 2) {
           return (_codeCtl?.read().length ?? 0) === 6;
@@ -350,6 +419,17 @@ export function wireChangePassword(ctx) {
   document.querySelector('#btn-chp-back')?.addEventListener('click', () => {
     if (_step === 3)      setStep(2);
     else if (_step === 2) setStep(1);
+  });
+
+  // ── «Забыли пароль?» / «Помню пароль» — toggle forgot-mode на шаге 1 ──
+  document.querySelector('#chp-forgot-link')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    setForgotMode(true);
+  });
+  document.querySelector('#chp-remember-link')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    setForgotMode(false);
+    setTimeout(() => document.querySelector('#chp-current')?.focus(), 50);
   });
 
   // ── Resend code (step 2). ──────────────────────────────────────

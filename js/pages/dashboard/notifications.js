@@ -500,7 +500,26 @@ function onItemClick(notif) {
   const cfg = typeConfig(notif);
   try {
     const href = typeof cfg.href === 'function' ? cfg.href(notif) : cfg.href;
-    if (href) window.location.href = href;
+    if (!href) return;
+    // Если URL — это тот же dashboard.html с другим hash'ем — меняем только
+    // hash, чтобы НЕ дёрнуть PIN-gate (это in-system навигация, юзер не
+    // должен заново подтверждать личность). Полный location.href set может
+    // в некоторых сценариях привести к reload (если текущий URL без hash'а),
+    // что попадёт под PIN-gate.
+    const isSamePage = href.startsWith('/pages/dashboard.html')
+                    && location.pathname.endsWith('/pages/dashboard.html');
+    if (isSamePage) {
+      const hashIdx = href.indexOf('#');
+      const newHash = hashIdx >= 0 ? href.slice(hashIdx) : '';
+      // Сначала ставим hash (это никогда не вызовет reload), потом
+      // диспатчим hashchange — на случай, если hash совпал с текущим
+      // (тогда нативный event не выстрелит, а tab-switcher его слушает).
+      const prev = location.hash;
+      location.hash = newHash;
+      if (prev === newHash) window.dispatchEvent(new HashChangeEvent('hashchange'));
+    } else {
+      window.location.href = href;
+    }
   } catch (_) { /* navigation issue is non-fatal */ }
 }
 
@@ -605,7 +624,7 @@ document.querySelector('#btn-mark-all-read')?.addEventListener('click', async ()
   refreshAll();
   try {
     await notifsApi.markAllRead();
-    toast(getLang() === 'en' ? 'All marked as read' : 'Все прочитаны', 'ok');
+    toast(t('toasts.all_marked_as_read'), 'ok');
   } catch (err) {
     // Best-effort rollback — flip back any rows we just stamped.
     _notifications.forEach(n => { if (n.read_at === stamp) n.read_at = null; });

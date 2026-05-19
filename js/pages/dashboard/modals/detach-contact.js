@@ -95,7 +95,7 @@ export function wireDetachContact(ctx) {
         password:        pwd,
       });
       closeModal('detach-contact-modal');
-      toast(getLang() === 'en' ? 'Contact detached' : 'Контакт откреплён', 'ok');
+      toast(t('toasts.contact_detached'), 'ok');
       _ctx.refresh();
     } catch (err) {
       // Surface contact-mismatch errors against the contact field so the

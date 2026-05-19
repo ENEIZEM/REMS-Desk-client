@@ -18,6 +18,7 @@ import { auth, getDeviceId }                 from '../api.js';
 import { requireGuest, toast, errorMessage } from '../auth.js';
 import { t, initI18n, onLangChange, applyTranslations } from '../i18n.js';
 import { wireFormGuard }                     from '../form-guard.js';
+import { grantPinPass }                      from '../lib/pin-gate.js';
 
 // ── Hoisted helpers ─────────────────────────────────────────────
 function q(sel) { return document.querySelector(sel); }
@@ -302,6 +303,9 @@ function wireDigitBoxes(inputs, { onSubmit } = {}) {
       const data = await auth.login(contact, password, pin);
       localStorage.setItem('rems_token',   data.data.token);
       localStorage.setItem('rems_contact', contact);
+      // Юзер только что ввёл пароль (+PIN при необходимости) — выдаём
+      // one-shot pass, иначе dashboard сразу попросит PIN ещё раз.
+      grantPinPass();
       window.location.href = '/pages/dashboard.html';
     } catch (err) {
       const params = err?.data?.error_params || {};
@@ -395,6 +399,7 @@ function wireDigitBoxes(inputs, { onSubmit } = {}) {
     try {
       const data = await auth.login(contact, null, pin);
       localStorage.setItem('rems_token', data.data.token);
+      grantPinPass();   // юзер только что ввёл PIN — не спрашиваем ещё раз
       window.location.href = '/pages/dashboard.html';
     } catch (err) {
       const params = err?.data?.error_params || {};
@@ -431,6 +436,401 @@ function wireDigitBoxes(inputs, { onSubmit } = {}) {
     q('#step-pin')?.classList.add('hidden');
     q('#step-password')?.classList.remove('hidden');
   });
+
+  // ─────────────────────────────────────────────────────────────
+  // FORGOT-PASSWORD — 3-шаговый wizard в стиле change-password modal.
+  //   Step 1: ввод контакта (валидация формата ДО запроса к бэку)
+  //   Step 2: 6-значный код от sendCode('reset_password')
+  //   Step 3: новый пароль + подтверждение
+  //   Step 4: success → автоматически возвращаемся к login с предзаполненным
+  //           контактом и пустым полем пароля.
+  //
+  // Бэк через purpose='reset_password' возвращает success даже для
+  // незарегистрированного контакта (anti-enumeration). Здесь это
+  // незаметно: пройдём на шаг 2, ввод неверного кода → backend
+  // ответит code_invalid, пользователь увидит «неверный код».
+  // ─────────────────────────────────────────────────────────────
+  const fpCodeInputs = document.querySelectorAll('.forgot-code-input');
+  const fpPinInputs  = document.querySelectorAll('.fp-pin-new');
+  const fpPin2Inputs = document.querySelectorAll('.fp-pin-confirm');
+  let fpStep         = 1;
+  let fpContact      = '';
+  let fpResendTimer  = null;
+  let fpMode         = 'password';   // 'password' | 'pin'
+
+  function fpHideAllAlerts() {
+    hideAlert('err-fp-1');
+    hideAlert('err-fp-2');
+    hideAlert('err-fp-3');
+  }
+
+  function fpSetStep(n) {
+    fpStep = n;
+    for (let i = 1; i <= 4; i++) {
+      q(`#fp-step-${i}`)?.classList.toggle('hidden', i !== n);
+    }
+    // Stepper: 4-й шаг — success, скрываем стрелочки прогресса
+    q('#fp-steps-track')?.classList.toggle('hidden', n === 4);
+    for (let i = 1; i <= 3; i++) {
+      const c = q(`#fp-circle-${i}`);
+      if (!c) continue;
+      c.classList.remove('active', 'done');
+      if (i < n) {
+        c.classList.add('done');
+        c.innerHTML = '<i class="ph ph-check" style="font-size:.875rem;"></i>';
+      } else {
+        c.textContent = String(i);
+        if (i === n) c.classList.add('active');
+      }
+      const line = q(`#fp-line-${i}`);
+      if (line) line.classList.toggle('done', i < n);
+    }
+    // Кнопки footer'а перекраиваются под шаг.
+    const next   = q('#btn-fp-next');
+    const back   = q('#btn-fp-back');
+    const cancel = q('#btn-fp-cancel');
+    const nextTx = q('#btn-fp-next-text');
+    if (back)   back.style.display   = (n === 2 || n === 3) ? '' : 'none';
+    if (cancel) cancel.style.display = (n === 4) ? 'none' : '';
+    if (next) {
+      if (n === 4) {
+        if (nextTx) { nextTx.textContent = t('auth.forgot.success_btn') || 'Войти'; nextTx.setAttribute('data-i18n', 'auth.forgot.success_btn'); }
+      } else if (n === 3) {
+        if (nextTx) { nextTx.textContent = t('auth.forgot.submit') || 'Сменить пароль'; nextTx.setAttribute('data-i18n', 'auth.forgot.submit'); }
+      } else {
+        if (nextTx) { nextTx.textContent = t('common.next') || 'Далее'; nextTx.setAttribute('data-i18n', 'common.next'); }
+      }
+    }
+  }
+
+  function fpSetResendCountdown(seconds) {
+    const btnRes  = q('#btn-fp-resend');
+    const waitEl  = q('#fp-resend-wait');
+    const cntEl   = q('#fp-resend-countdown');
+    if (fpResendTimer) { clearInterval(fpResendTimer); fpResendTimer = null; }
+    if (seconds <= 0) {
+      if (waitEl) waitEl.classList.add('hidden');
+      if (btnRes) btnRes.style.display = '';
+      return;
+    }
+    if (waitEl) waitEl.classList.remove('hidden');
+    if (btnRes) btnRes.style.display = 'none';
+    if (cntEl)  cntEl.textContent = String(seconds);
+    fpResendTimer = setInterval(() => {
+      seconds -= 1;
+      if (cntEl) cntEl.textContent = String(seconds);
+      if (seconds <= 0) {
+        clearInterval(fpResendTimer);
+        fpResendTimer = null;
+        if (waitEl) waitEl.classList.add('hidden');
+        if (btnRes) btnRes.style.display = '';
+      }
+    }, 1000);
+  }
+
+  function showForgotCard(mode = 'password') {
+    fpMode = mode;
+    q('#step-password')?.classList.add('hidden');
+    q('#step-pin')?.classList.add('hidden');
+    q('#step-forgot')?.classList.remove('hidden');
+    fpHideAllAlerts();
+    clearFieldError('err-forgot-contact');
+    fpContact = '';
+    fpCodeInputs.forEach(i => { i.value = ''; i.classList.remove('filled', 'error'); });
+    fpPinInputs.forEach(i  => { i.value = ''; i.classList.remove('filled', 'error'); });
+    fpPin2Inputs.forEach(i => { i.value = ''; i.classList.remove('filled', 'error'); });
+    const pwd  = q('#forgot-pwd');  if (pwd)  pwd.value  = '';
+    const pwd2 = q('#forgot-pwd2'); if (pwd2) pwd2.value = '';
+    q('#fp-strength').style.display = 'none';
+    // Подставляем title/subtitle и панель в зависимости от режима.
+    const titleEl    = q('#step-forgot .auth-title');
+    const subtitleEl = q('#step-forgot .auth-subtitle');
+    if (mode === 'pin') {
+      if (titleEl)    { titleEl.textContent    = t('auth.forgot.pin_title'); titleEl.setAttribute('data-i18n', 'auth.forgot.pin_title'); }
+      if (subtitleEl) { subtitleEl.textContent = t('auth.forgot.pin_subtitle'); subtitleEl.setAttribute('data-i18n', 'auth.forgot.pin_subtitle'); }
+    } else {
+      if (titleEl)    { titleEl.textContent    = t('auth.forgot.title'); titleEl.setAttribute('data-i18n', 'auth.forgot.title'); }
+      if (subtitleEl) { subtitleEl.textContent = t('auth.forgot.subtitle'); subtitleEl.setAttribute('data-i18n', 'auth.forgot.subtitle'); }
+    }
+    // Step-3 панели: показываем нужную. У .hidden !important — поэтому
+    // снимаем/ставим класс, а не только style.display.
+    const pwdPanel = q('#fp-step-3-pwd');
+    const pinPanel = q('#fp-step-3-pin');
+    if (pwdPanel) {
+      pwdPanel.classList.toggle('hidden', mode === 'pin');
+      pwdPanel.style.display = mode === 'pin' ? 'none' : 'flex';
+    }
+    if (pinPanel) {
+      pinPanel.classList.toggle('hidden', mode !== 'pin');
+      pinPanel.style.display = mode === 'pin' ? 'flex' : 'none';
+    }
+    const contactEl = q('#forgot-contact');
+    if (contactEl) {
+      const prefilled = q('#contact')?.value?.trim();
+      contactEl.value = prefilled || '';
+      setTimeout(() => contactEl.focus(), 50);
+    }
+    fpSetStep(1);
+  }
+
+  function hideForgotCard() {
+    q('#step-forgot')?.classList.add('hidden');
+    q('#step-password')?.classList.remove('hidden');
+    if (fpResendTimer) { clearInterval(fpResendTimer); fpResendTimer = null; }
+  }
+
+  q('#open-forgot')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    showForgotCard('password');
+  });
+  q('#open-forgot-pin')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    showForgotCard('pin');
+  });
+  q('#btn-fp-cancel')?.addEventListener('click', hideForgotCard);
+  q('#btn-fp-back')?.addEventListener('click', () => {
+    if (fpStep === 3)      fpSetStep(2);
+    else if (fpStep === 2) fpSetStep(1);
+  });
+
+  // Wire 6-значные code-инпуты (стандартный auto-advance / backspace / paste).
+  wireDigitBoxes(fpCodeInputs);
+  // То же для двух PIN-групп шага 3 (режим pin).
+  wireDigitBoxes(fpPinInputs);
+  wireDigitBoxes(fpPin2Inputs);
+  // Авто-сабмит шага 2: как только заполнены 6 цифр — кнопка "Далее" нажимается.
+  fpCodeInputs.forEach((inp, idx) => {
+    if (idx === fpCodeInputs.length - 1) {
+      inp.addEventListener('input', () => {
+        if (inp.value && joinDigits(fpCodeInputs).length === 6 && fpStep === 2) {
+          setTimeout(() => q('#btn-fp-next')?.click(), 80);
+        }
+      });
+    }
+  });
+
+  // Password-strength meter для шага 3 (зеркало change-password modal).
+  q('#forgot-pwd')?.addEventListener('input', () => {
+    const pw = q('#forgot-pwd').value;
+    let s = 0;
+    if (pw.length >= 8)   s++;
+    if (/[A-Z]/.test(pw)) s++;
+    if (/[a-z]/.test(pw)) s++;
+    if (/\d/.test(pw))    s++;
+    const strength = Math.max(1, s);
+    const wrap = q('#fp-strength');
+    if (!wrap) return;
+    wrap.style.display = pw ? '' : 'none';
+    const bars   = wrap.querySelectorAll('.pw-bar');
+    const colors = ['#ef4444', '#f59e0b', '#0d9488', '#0f766e'];
+    const labels = getLang() === 'en'
+      ? ['Very weak', 'Weak', 'Good', 'Strong']
+      : ['Очень слабый', 'Слабый', 'Хороший', 'Надёжный'];
+    bars.forEach((bar, i) => {
+      bar.style.background = i < strength ? colors[strength - 1] : 'var(--clr-border)';
+    });
+    const lbl = q('#fp-strength-label');
+    if (lbl) { lbl.textContent = pw ? labels[strength - 1] : ''; lbl.style.color = colors[strength - 1]; }
+  });
+  // Кнопки eye-toggle для двух password-инпутов.
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-toggle-pw]');
+    if (!btn || !btn.closest('#step-forgot')) return;
+    const inp = q('#' + btn.dataset.togglePw);
+    if (!inp) return;
+    const show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    const icon = btn.querySelector('i');
+    if (icon) icon.className = show ? 'ph ph-eye-slash' : 'ph ph-eye';
+  });
+
+  // Resend на шаге 2.
+  q('#btn-fp-resend')?.addEventListener('click', async () => {
+    if (!fpContact) return;
+    hideAlert('err-fp-2');
+    try {
+      const data = await auth.sendCode(fpContact, 'reset_password');
+      fpSetResendCountdown(Number(data?.data?.cooldown) || 60);
+      fpCodeInputs.forEach(i => { i.value = ''; i.classList.remove('filled', 'error'); });
+      fpCodeInputs[0]?.focus();
+    } catch (err) {
+      showAlertFromError('err-fp-2', 'err-fp-2-text', err);
+    }
+  });
+
+  // Главная кнопка "Далее" — диспатчер по шагам.
+  async function fpNext() {
+    if (fpStep === 1) {
+      const contact = q('#forgot-contact')?.value?.trim() || '';
+      hideAlert('err-fp-1');
+      clearFieldError('err-forgot-contact');
+      if (!contact) {
+        showFieldError('err-forgot-contact', 'errors.validation.missing_fields');
+        return;
+      }
+      const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact);
+      const isPhone = /^\+?[0-9\s\-\(\)\.]{7,20}$/.test(contact);
+      if (!isEmail && !isPhone) {
+        showFieldError('err-forgot-contact', 'errors.validation.invalid_contact_format');
+        return;
+      }
+
+      const btn = q('#btn-fp-next');
+      setLoading(btn, true);
+      try {
+        const data = await auth.sendCode(contact, 'reset_password');
+        fpContact = contact;
+        const masked = isEmail
+          ? contact.replace(/(.{1,2})(.*)(@.*)/, (_, a, b, c) => a + '*'.repeat(Math.max(1, b.length)) + c)
+          : contact.replace(/(.{0,3})(.*)(.{2})/, (_, a, b, c) => a + '*'.repeat(Math.max(1, b.length)) + c);
+        const tgtEl = q('#forgot-target-mask');
+        if (tgtEl) tgtEl.textContent = masked;
+        fpSetStep(2);
+        fpSetResendCountdown(Number(data?.data?.cooldown) || 60);
+        setTimeout(() => fpCodeInputs[0]?.focus(), 80);
+      } catch (err) {
+        showAlertFromError('err-fp-1', 'err-fp-1-text', err);
+      } finally {
+        setLoading(btn, false);
+      }
+      return;
+    }
+
+    if (fpStep === 2) {
+      // Перед переходом на шаг 3 проверяем код через reset-verify-code:
+      // он НЕ потребляет код (шаг 3 это сделает при финальном submit),
+      // но инкрементит failed_attempts на miss — bruteforce ограничен 5
+      // попытками. Иначе юзер мог бы пройти весь мастер с фиктивным
+      // кодом, что плохо UX-wise.
+      const code = joinDigits(fpCodeInputs);
+      if (code.length !== 6) {
+        showAlertKey('err-fp-2', 'err-fp-2-text', 'errors.validation.missing_fields');
+        return;
+      }
+      hideAlert('err-fp-2');
+      const btn = q('#btn-fp-next');
+      setLoading(btn, true);
+      try {
+        await auth.resetVerifyCode(fpContact, code);
+        fpSetStep(3);
+        setTimeout(() => {
+          if (fpMode === 'pin') document.querySelectorAll('.fp-pin-new')[0]?.focus();
+          else q('#forgot-pwd')?.focus();
+        }, 80);
+      } catch (err) {
+        const params = err?.data?.error_params || {};
+        const key    = err?.error_key;
+        if (key === 'errors.verification.code_invalid' && typeof params.attempts_remaining === 'number') {
+          showAlertKey('err-fp-2', 'err-fp-2-text', 'errors.auth.pin_invalid_with_attempts');
+          // re-render с подставленным n
+          const span = document.querySelector('#err-fp-2-text');
+          if (span) span.textContent = t('errors.auth.pin_invalid_with_attempts', { n: params.attempts_remaining })
+                                       .replace('PIN-код', t('auth.forgot.code_label'));
+        } else {
+          showAlertFromError('err-fp-2', 'err-fp-2-text', err);
+        }
+        fpCodeInputs.forEach(i => { i.classList.add('error'); });
+        fpCodeInputs[0]?.focus();
+      } finally {
+        setLoading(btn, false);
+      }
+      return;
+    }
+
+    if (fpStep === 3) {
+      const code = joinDigits(fpCodeInputs);
+      hideAlert('err-fp-3');
+      const btn = q('#btn-fp-next');
+
+      if (fpMode === 'pin') {
+        const pin  = joinDigits(fpPinInputs);
+        const pin2 = joinDigits(fpPin2Inputs);
+        clearFieldError('err-fp-pin');
+        clearFieldError('err-fp-pin2');
+        if (!/^\d{6}$/.test(pin)) {
+          showFieldError('err-fp-pin', 'errors.validation.pin_invalid_format');
+          return;
+        }
+        if (pin !== pin2) {
+          showFieldError('err-fp-pin2', 'errors.validation.pin_mismatch');
+          return;
+        }
+        setLoading(btn, true);
+        try {
+          await auth.resetPin({
+            target: fpContact, code,
+            new_pin: pin, new_pin_confirm: pin2,
+          });
+          fpSetStep(4);
+        } catch (err) {
+          showAlertFromError('err-fp-3', 'err-fp-3-text', err);
+          if (err?.error_key === 'errors.verification.code_invalid' ||
+              err?.error_key === 'errors.verification.code_not_found') {
+            fpCodeInputs.forEach(i => { i.value = ''; i.classList.remove('filled'); i.classList.add('error'); });
+            fpSetStep(2);
+            setTimeout(() => fpCodeInputs[0]?.focus(), 80);
+            showAlertKey('err-fp-2', 'err-fp-2-text', 'errors.verification.code_invalid');
+          }
+        } finally {
+          setLoading(btn, false);
+        }
+        return;
+      }
+
+      // mode === 'password'
+      const pwd  = q('#forgot-pwd')?.value  || '';
+      const pwd2 = q('#forgot-pwd2')?.value || '';
+      clearFieldError('err-fp-pwd');
+      clearFieldError('err-fp-pwd2');
+
+      if (pwd.length < 8 || !/[A-Z]/.test(pwd) || !/[a-z]/.test(pwd) || !/\d/.test(pwd)) {
+        showFieldError('err-fp-pwd', 'errors.validation.password_requirements');
+        return;
+      }
+      if (pwd !== pwd2) {
+        showFieldError('err-fp-pwd2', 'errors.validation.passwords_mismatch');
+        return;
+      }
+
+      setLoading(btn, true);
+      try {
+        await auth.resetPassword({
+          target: fpContact, code,
+          new_password: pwd, new_password_confirm: pwd2,
+        });
+        fpSetStep(4);
+      } catch (err) {
+        showAlertFromError('err-fp-3', 'err-fp-3-text', err);
+        if (err?.error_key === 'errors.verification.code_invalid' ||
+            err?.error_key === 'errors.verification.code_not_found') {
+          fpCodeInputs.forEach(i => { i.value = ''; i.classList.remove('filled'); i.classList.add('error'); });
+          fpSetStep(2);
+          setTimeout(() => fpCodeInputs[0]?.focus(), 80);
+          showAlertKey('err-fp-2', 'err-fp-2-text', 'errors.verification.code_invalid');
+        }
+      } finally {
+        setLoading(btn, false);
+      }
+      return;
+    }
+
+    if (fpStep === 4) {
+      // Готово — возвращаемся к login со заполненным контактом.
+      const lc = q('#contact');
+      if (lc) lc.value = fpContact;
+      hideForgotCard();
+      toast(t(fpMode === 'pin' ? 'auth.forgot.pin_success_toast' : 'auth.forgot.success_toast'), 'ok');
+    }
+  }
+  q('#btn-fp-next')?.addEventListener('click', fpNext);
+  // Helper: clear field-error span by id.
+  function clearFieldError(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('show');
+    const span = el.querySelector('span');
+    if (span) span.textContent = '';
+  }
 
 })().catch(err => {
   console.error('[login] Fatal initialization error:', err);

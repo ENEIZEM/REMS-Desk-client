@@ -7,6 +7,22 @@
 export function openModal(id)  { document.querySelector(`#${id}`)?.classList.add('open'); }
 export function closeModal(id) { document.querySelector(`#${id}`)?.classList.remove('open'); }
 
+// Глобальный Escape-listener для всех модалок. Backdrop-клик намеренно
+// отключён (см. dashboard/index.js — нельзя случайно потерять введённые
+// данные), но клавиатурные юзеры должны иметь способ закрыть модалку
+// без поиска × кнопки. Закрываем самую верхнюю открытую модалку.
+if (typeof document !== 'undefined' && !window.__remsModalEscapeWired) {
+  window.__remsModalEscapeWired = true;
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    // Берём последнюю открытую модалку — она и есть «верхняя» в стеке.
+    const open = document.querySelectorAll('.modal.open');
+    if (!open.length) return;
+    const top = open[open.length - 1];
+    top.classList.remove('open');
+  });
+}
+
 export function setLoading(btn, on) {
   if (!btn) return;
   btn.disabled = on;

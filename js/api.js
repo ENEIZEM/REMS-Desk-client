@@ -45,10 +45,43 @@ async function request(method, path, body, opts = {}) {
     err.status     = res.status;
     err.error_key  = data?.error_key;
     err.data       = data;
+    // Авто-логаут ТОЛЬКО при session/token/device-ошибках. Прочие 401
+    // (invalid_credentials в change-password, code_invalid и т.п.) — это
+    // ошибки на конкретной операции, а НЕ протухший сеанс; редирект на
+    // login здесь только злил бы юзера.
+    if (res.status === 401 && token && !opts.skipAuthRedirect && isSessionError(data?.error_key)) {
+      handleUnauthorized();
+    }
     throw err;
   }
 
   return data;
+}
+
+const SESSION_ERROR_KEYS = new Set([
+  'errors.auth.token_missing',
+  'errors.auth.token_expired',
+  'errors.auth.token_invalid',
+  'errors.auth.session_not_found',
+  'errors.auth.session_revoked',
+  'errors.auth.session_expired',
+  'errors.auth.session_mismatch',
+  'errors.auth.device_mismatch',
+  'errors.auth.device_fingerprint_missing',
+]);
+function isSessionError(key) {
+  return typeof key === 'string' && SESSION_ERROR_KEYS.has(key);
+}
+
+// Single-shot redirect guard: несколько параллельных запросов могут вернуть 401
+// одновременно — нам нужен только один редирект.
+let _unauthorizedHandled = false;
+function handleUnauthorized() {
+  if (_unauthorizedHandled) return;
+  _unauthorizedHandled = true;
+  try { localStorage.removeItem('rems_token'); } catch {}
+  const fromPages = location.pathname.toLowerCase().includes('/pages/');
+  location.href = (fromPages ? '..' : '.') + '/pages/login.html';
 }
 
 // ── Multipart upload (no JSON content-type) ──────────────────────
@@ -67,6 +100,7 @@ async function upload(path, formData) {
     err.status     = res.status;
     err.error_key  = data?.error_key;
     err.data       = data;
+    if (res.status === 401 && token && isSessionError(data?.error_key)) handleUnauthorized();
     throw err;
   }
   return data;
@@ -116,6 +150,28 @@ export const auth = {
   }),
   logout:       ()                  => request('POST', '/auth/logout',        {}),
   acceptInvite: (token, payload)    => request('POST', '/auth/accept-invite', { token, ...payload }),
+
+  /**
+   * Forgot-password финальный шаг. Перед этим вызови:
+   *   auth.sendCode(contact, 'reset_password')
+   * Бэк отвечает 200 даже если контакта нет (anti-enumeration), поэтому
+   * UX «отправили код, если адрес зарегистрирован» — нейтральный.
+   * payload: { target, code, new_password, new_password_confirm }
+   */
+  resetPassword: (payload) => request('POST', '/auth/reset-password', payload),
+
+  /** payload: { target, code, new_pin, new_pin_confirm } */
+  resetPin:      (payload) => request('POST', '/auth/reset-pin',      payload),
+
+  /** Превью проверки кода на шаге 2 «забыли пароль/PIN». Не консьюмит код. */
+  resetVerifyCode: (target, code) => request('POST', '/auth/reset-verify-code', { target, code }),
+
+  /**
+   * Forgot-PIN финальный шаг. Тот же purpose='reset_password' для кода —
+   * identity-proof одинаков. Ревокает все сессии на успехе.
+   * payload: { target, code, new_pin, new_pin_confirm }
+   */
+  resetPin: (payload) => request('POST', '/auth/reset-pin', payload),
   /** Set or change PIN. payload: { pin, pin_confirm, current_pin? } */
   setPin:       (payload)           => request('POST', '/auth/set-pin',       payload),
   verifyPin:    (pin)               => request('POST', '/auth/verify-pin',    { pin }),

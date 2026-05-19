@@ -6,6 +6,7 @@
 import { isLoggedIn, clearSession, auth } from './api.js';
 import { disconnectSocket }               from './socket.js';
 import { t, apiError }                    from './i18n.js';
+import { clearPinPass }                   from './lib/pin-gate.js';
 
 // ── Route guards ─────────────────────────────────────────────────
 
@@ -23,6 +24,7 @@ export function requireGuest() {
 export async function logout() {
   try { await auth.logout(); } catch (_) {}
   clearSession();
+  clearPinPass();
   disconnectSocket();
   redirectTo('/pages/login.html');
 }
@@ -61,7 +63,13 @@ export function toast(message, type = 'info', duration = 3500) {
     warn:  'ph-warning',
     info:  'ph-info',
   };
-  el.innerHTML = `<i class="ph ${iconMap[type] || 'ph-info'}"></i><span>${message}</span>`;
+  // textContent (а не innerHTML) — message может прийти из ненадёжного источника
+  // (тело уведомления, ошибка от бэкенда). Никакой HTML-инъекции.
+  const icon = document.createElement('i');
+  icon.className = `ph ${iconMap[type] || 'ph-info'}`;
+  const span = document.createElement('span');
+  span.textContent = message == null ? '' : String(message);
+  el.append(icon, span);
   container.appendChild(el);
 
   setTimeout(() => {

@@ -23,6 +23,7 @@ import { requireGuest, toast, errorMessage } from '../auth.js';
 import { t, initI18n, getLang, onLangChange, applyTranslations } from '../i18n.js';
 import { wireFormGuard }                     from '../form-guard.js';
 import { createCodeInput }                   from '../lib/code-input.js';
+import { grantPinPass }                      from '../lib/pin-gate.js';
 
 // ── Hoisted helpers ─────────────────────────────────────────────
 function q(sel) { return document.querySelector(sel); }
@@ -143,7 +144,67 @@ function hideAlert(id) {
     role:              '',
     organization_name: '',
     organization_id:   null,
+    // Если регистрация инициирована переходом по invite-ссылке —
+    // сохраняем токен. На финальном submit отправим его (если контакт
+    // совпадает с приглашённым), backend сам решит auto-accept vs pending.
+    invite_token:      '',
+    invite_contact:    '',   // sentinel — оригинальный контакт инвайта
   };
+
+  // ── Invite-token предзаполнение ───────────────────────────────
+  // URL вида /register?invite=<hex32+>. До любых других init шагов
+  // дёргаем мета-эндпоинт: если ok → fixe org_id, force role=employee,
+  // pre-fill контакт. Если 404 → показываем toast и продолжаем как
+  // обычная регистрация (юзер сам выберет роль).
+  try {
+    const inviteToken = new URLSearchParams(location.search).get('invite');
+    if (inviteToken && /^[a-f0-9]{32,128}$/i.test(inviteToken)) {
+      const metaResp = await fetch(`/api/auth/invite/${encodeURIComponent(inviteToken)}`, {
+        headers: { 'X-Device-Id': await (await import('../api.js')).getDeviceId() },
+      });
+      if (metaResp.ok) {
+        const meta = (await metaResp.json())?.data;
+        if (meta?.organization_id) {
+          state.invite_token   = inviteToken;
+          state.invite_contact = String(meta.contact_raw || '').toLowerCase();
+          state.organization_id = Number(meta.organization_id);
+          // Pre-fill contact field + lock UI к employee.
+          const contactEl = document.querySelector('#reg-contact');
+          if (contactEl) {
+            contactEl.value = meta.contact_raw || '';
+            contactEl.readOnly = true;
+            contactEl.style.cursor = 'not-allowed';
+          }
+          const orgIdEl = document.querySelector('#org-id');
+          if (orgIdEl) {
+            orgIdEl.value = String(meta.organization_id);
+            orgIdEl.readOnly = true;
+            orgIdEl.style.cursor = 'not-allowed';
+          }
+          // Лочим роль на employee и выбираем её радио.
+          const employeeRadio = document.querySelector('input[name="role"][value="employee"]');
+          if (employeeRadio) {
+            employeeRadio.checked = true;
+            selectedRole = 'employee';
+            // Подсветить выбранную карточку + скрыть остальные роли
+            // (юзер не должен случайно переключиться на owner).
+            document.querySelectorAll('.role-card').forEach(card => {
+              const v = card.querySelector('input[name="role"]')?.value;
+              if (v === 'employee') {
+                card.classList.add('selected');
+              } else {
+                card.style.display = 'none';
+              }
+            });
+          }
+          // Подсветить org-id row, скрыть org-name row.
+          document.querySelector('#org-name')?.closest('.form-group')?.classList.add('hidden');
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[register] invite meta fetch failed:', e);
+  }
 
   // ── Code-input controller (step 2) ───────────────────────────
   // The wiring (auto-advance, paste, backspace, resend countdown)
@@ -509,7 +570,26 @@ function hideAlert(id) {
     const btn = q('#btn-step3');
     setLoading(btn, true);
     try {
-      await auth.register(payload);
+      // Auto-accept by invite: если юзер пришёл по invite-ссылке и ввёл
+      // ТОТ ЖЕ контакт, что был приглашён — пропускаем pending и сразу
+      // создаём approved-сотрудника через accept-invite endpoint.
+      // Если контакт не совпадает — обычная регистрация (pending).
+      const contactNorm = String(state.contact).toLowerCase().replace(/[\s\-().]/g, '');
+      const inviteNorm  = String(state.invite_contact).toLowerCase().replace(/[\s\-().]/g, '');
+      const matchesInvite = state.invite_token && inviteNorm && contactNorm === inviteNorm;
+      if (matchesInvite) {
+        await auth.acceptInvite(state.invite_token, {
+          full_name: fullName,
+          password,
+          password_confirm: password2,
+          pin,
+          language_code: getLang(),
+          ...(dept && { department: dept }),
+        });
+      } else {
+        await auth.register(payload);
+      }
+      grantPinPass();
       codeCtl.stopResendTimer();
       goStep(4);
     } catch (err) {

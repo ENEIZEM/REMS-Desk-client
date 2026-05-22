@@ -16,7 +16,7 @@
 
 import { auth, getDeviceId }                 from '../api.js';
 import { requireGuest, toast, errorMessage } from '../auth.js';
-import { t, initI18n, onLangChange, applyTranslations } from '../i18n.js';
+import { t, initI18n, onLangChange, applyTranslations, getLang } from '../i18n.js';
 import { wireFormGuard }                     from '../form-guard.js';
 import { grantPinPass }                      from '../lib/pin-gate.js';
 
@@ -152,11 +152,10 @@ function showAlertWithParams(alertId, textId, key, params = {}) {
       if (left <= 0) {
         clearInterval(alertEl._countdownTimer);
         alertEl._countdownTimer = null;
-        // Keep the alert visible at 0:00 so the user can re-try with the
-        // same click — no flicker on the page.
-        render({ time: '0:00' });
-        // Release the buttons; form-guard will recompute disabled-state
-        // from the current input values on the next user interaction.
+        // Истёкший lockout: прячем alert (UX-просьба) и разблокируем
+        // кнопки. Form-guard пересчитает disabled на следующем input'е.
+        alertEl.classList.remove('show');
+        el.textContent = '';
         [q('#btn-password'), q('#btn-pin')].forEach(btn => {
           if (!btn) return;
           delete btn.dataset.lockedUntil;
@@ -501,6 +500,8 @@ function wireDigitBoxes(inputs, { onSubmit } = {}) {
         if (nextTx) { nextTx.textContent = t('common.next') || 'Далее'; nextTx.setAttribute('data-i18n', 'common.next'); }
       }
     }
+    // Recompute form-guard на новом шаге — required fields разные.
+    if (typeof fpGuard !== 'undefined') fpGuard?.refresh?.();
   }
 
   function fpSetResendCountdown(seconds) {
@@ -593,6 +594,35 @@ function wireDigitBoxes(inputs, { onSubmit } = {}) {
     else if (fpStep === 2) fpSetStep(1);
   });
 
+  // Form-guard для «Далее» в forgot wizard. На каждом шаге своё условие:
+  //   step 1 — введён контакт
+  //   step 2 — все 6 цифр кода заполнены
+  //   step 3 (mode=password) — оба поля пароля непустые
+  //   step 3 (mode=pin)      — оба PIN-инпута заполнены (12 цифр)
+  //   step 4 — success, кнопка всё равно скрыта
+  const fpGuard = wireFormGuard({
+    button:   '#btn-fp-next',
+    required: [{
+      kind:  'fn',
+      watch: ['#forgot-contact', '.forgot-code-input',
+              '#forgot-pwd', '#forgot-pwd2',
+              '.fp-pin-new', '.fp-pin-confirm'],
+      fn: () => {
+        if (fpStep === 1) return !!q('#forgot-contact')?.value.trim();
+        if (fpStep === 2) return joinDigits(fpCodeInputs).length === 6;
+        if (fpStep === 3) {
+          if (fpMode === 'pin') {
+            return joinDigits(fpPinInputs).length === 6 && joinDigits(fpPin2Inputs).length === 6;
+          }
+          return !!q('#forgot-pwd')?.value && !!q('#forgot-pwd2')?.value;
+        }
+        return true;
+      },
+    }],
+  });
+  // Глобальный refresh — вызывается при смене шага / mode.
+  const fpRefreshGuard = () => fpGuard?.refresh?.();
+
   // Wire 6-значные code-инпуты (стандартный auto-advance / backspace / paste).
   wireDigitBoxes(fpCodeInputs);
   // То же для двух PIN-групп шага 3 (режим pin).
@@ -627,7 +657,9 @@ function wireDigitBoxes(inputs, { onSubmit } = {}) {
       ? ['Very weak', 'Weak', 'Good', 'Strong']
       : ['Очень слабый', 'Слабый', 'Хороший', 'Надёжный'];
     bars.forEach((bar, i) => {
-      bar.style.background = i < strength ? colors[strength - 1] : 'var(--clr-border)';
+      const color = i < strength ? colors[strength - 1] : 'var(--clr-border)';
+      bar.style.background = color;
+      bar.style.backgroundColor = color;
     });
     const lbl = q('#fp-strength-label');
     if (lbl) { lbl.textContent = pw ? labels[strength - 1] : ''; lbl.style.color = colors[strength - 1]; }
@@ -721,11 +753,9 @@ function wireDigitBoxes(inputs, { onSubmit } = {}) {
         const params = err?.data?.error_params || {};
         const key    = err?.error_key;
         if (key === 'errors.verification.code_invalid' && typeof params.attempts_remaining === 'number') {
-          showAlertKey('err-fp-2', 'err-fp-2-text', 'errors.auth.pin_invalid_with_attempts');
-          // re-render с подставленным n
-          const span = document.querySelector('#err-fp-2-text');
-          if (span) span.textContent = t('errors.auth.pin_invalid_with_attempts', { n: params.attempts_remaining })
-                                       .replace('PIN-код', t('auth.forgot.code_label'));
+          showAlertWithParams('err-fp-2', 'err-fp-2-text',
+            'errors.verification.code_invalid_with_attempts',
+            { n: params.attempts_remaining });
         } else {
           showAlertFromError('err-fp-2', 'err-fp-2-text', err);
         }

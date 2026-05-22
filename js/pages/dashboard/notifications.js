@@ -358,11 +358,18 @@ function ensureNotifToastContainer() {
 
 /* ── Rendering ───────────────────────────────────────────────── */
 
-// Single render path now — `#overview-notifs` is the one home for the
-// list. The container scrolls internally if the list grows tall (see
-// `.overview-notifs-list` CSS).
+// Render-target можно подменить — solo dashboard кладёт ленту в
+// собственный slot (#solo-notifs-slot), owner/employee — в #overview-notifs.
+// setNotificationsTarget вызывается из оркестратора дашборда.
+let _renderTargetSelector = '#overview-notifs';
+export function setNotificationsTarget(selector) {
+  _renderTargetSelector = selector || '#overview-notifs';
+  // Если в новом контейнере уже есть данные — рендерим в него сразу.
+  renderOverviewNotifs();
+}
+
 function renderOverviewNotifs() {
-  const el = document.querySelector('#overview-notifs');
+  const el = document.querySelector(_renderTargetSelector);
   if (!el) return;
   if (!_notifications.length) {
     el.innerHTML = `<div class="empty-state" style="padding:2rem;"><i class="ph ph-bell-slash"></i><p class="empty-state-text">${t('notifications.empty')}</p></div>`;
@@ -445,6 +452,13 @@ function notifItemHTML(n) {
 export function resolveTitle(n) {
   const type = n?.notification_type ?? n?.type;
   if (!type) return t('notifications.types.unknown');
+  // Subtype overrides: «removed_by_owner» переиспользует enum-член
+  // 'join_rejected' (чтобы не менять CHECK constraint в БД), но семантически
+  // это «вас исключили», а не «заявка отклонена». Различаем по data.action.
+  const action = n?.data?.action;
+  if (type === 'join_rejected' && action === 'removed_by_owner') {
+    return t('notifications.types.removed_by_owner');
+  }
   return t(`notifications.types.${type}`);
 }
 

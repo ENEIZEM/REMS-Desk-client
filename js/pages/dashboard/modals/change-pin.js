@@ -22,9 +22,17 @@ let _ctx = {
 };
 
 let _guard = null;
+let _guardStep1 = null;   // Guard для Next-кнопки шага 1 (proof).
 let _curInputs = [];
 let _newInputs = [];
 let _cfmInputs = [];
+
+// Helper: refresh обоих guard'ов (Next шага 1 + Save шага 2). Module-
+// scope потому что setChpinStep тоже module-scope и должна вызывать.
+function refreshBothGuards() {
+  _guard?.refresh?.();
+  _guardStep1?.refresh?.();
+}
 
 // State для step-up flow («забыли PIN»).
 let _stepUp = {
@@ -66,7 +74,7 @@ function setChpinStep(n) {
   if (backBtn) backBtn.style.display = isStep1 ? 'none' : '';
   // hint в alert
   document.querySelector('#err-chpin')?.classList.remove('show');
-  _guard?.refresh();
+  refreshBothGuards();
 }
 
 function wirePinGroup(rootSel) {
@@ -134,6 +142,24 @@ export function wireChangePin(ctx) {
     }],
   });
 
+  // Form-guard для Next-кнопки шага 1: серая пока proof не введён
+  // (current PIN заполнен ИЛИ выбран контакт + введён 6-значный код).
+  _guardStep1 = wireFormGuard({
+    button:   '#btn-chpin-next',
+    required: [{
+      kind:  'fn',
+      watch: ['#chpin-current .pin-input', '.chpin-code-input'],
+      fn: () => {
+        if (_stepUp.active) {
+          const code = [...document.querySelectorAll('.chpin-code-input')].map(i => i.value).join('');
+          return !!_stepUp.target && code.length === 6;
+        }
+        const cur = [...document.querySelectorAll('#chpin-current .pin-input')].map(i => i.value).join('');
+        return cur.length === 6;
+      },
+    }],
+  });
+
   // Wire code-инпуты step-up (auto-advance / backspace / paste).
   const codeInputs = [...document.querySelectorAll('.chpin-code-input')];
   codeInputs.forEach((input, idx) => {
@@ -141,14 +167,14 @@ export function wireChangePin(ctx) {
       input.value = input.value.replace(/\D/, '').slice(0, 1);
       input.classList.toggle('filled', !!input.value);
       if (input.value && idx < codeInputs.length - 1) codeInputs[idx + 1].focus();
-      _guard?.refresh();
+      refreshBothGuards();
     });
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Backspace' && !input.value && idx > 0) {
         codeInputs[idx - 1].focus();
         codeInputs[idx - 1].value = '';
         codeInputs[idx - 1].classList.remove('filled');
-        _guard?.refresh();
+        refreshBothGuards();
       }
     });
     input.addEventListener('paste', (e) => {
@@ -158,7 +184,7 @@ export function wireChangePin(ctx) {
       e.preventDefault();
       [...raw].forEach((ch, i) => { if (codeInputs[i]) { codeInputs[i].value = ch; codeInputs[i].classList.add('filled'); } });
       codeInputs[Math.min(raw.length, codeInputs.length) - 1]?.focus();
-      _guard?.refresh();
+      refreshBothGuards();
     });
   });
 
@@ -174,7 +200,7 @@ export function wireChangePin(ctx) {
       const r = card.querySelector('input[name="chpin-contact"]');
       card.classList.toggle('selected', !!r?.checked);
     });
-    _guard?.refresh();
+    refreshBothGuards();
   }
 
   function enterStepUp() {
@@ -183,40 +209,37 @@ export function wireChangePin(ctx) {
     document.querySelector('#chpin-current-group')?.style.setProperty('display', 'none');
     const su = document.querySelector('#chpin-stepup-group');
     if (su) { su.classList.remove('hidden'); su.style.display = 'flex'; }
-    // Заполняем контакт-пикер из доступных контактов (см. подробный
-    // комментарий в change-password.js — здесь применяем тот же паттерн).
+    // 2 контакта → role-grid. 1 контакт → compact text вместо карточки.
     const available = _ctx.getAvailableContacts();
     const emailC    = available.find(c => c.type === 'email');
     const phoneC    = available.find(c => c.type === 'phone');
     const both      = !!emailC && !!phoneC;
     const choice    = document.querySelector('#chpin-contact-choice');
     const single    = document.querySelector('#chpin-contact-single');
-    const emailCard = choice?.querySelector('.role-card[data-contact="email"]');
-    const phoneCard = choice?.querySelector('.role-card[data-contact="phone"]');
-
-    if (single) single.style.display = 'none';
-    if (choice) {
-      choice.style.display = 'grid';
-      choice.classList.toggle('contact-picker--single', !both);
-    }
-    if (emailC && emailCard) document.querySelector('#chpin-contact-email-label').textContent = emailC.masked;
-    if (phoneC && phoneCard) document.querySelector('#chpin-contact-phone-label').textContent = phoneC.masked;
 
     if (both) {
-      if (emailCard) emailCard.style.display = '';
-      if (phoneCard) phoneCard.style.display = '';
+      if (single) single.style.display = 'none';
+      if (choice) {
+        choice.style.display = 'grid';
+        choice.classList.remove('contact-picker--single');
+      }
+      document.querySelector('#chpin-contact-email-label').textContent = emailC.masked;
+      document.querySelector('#chpin-contact-phone-label').textContent = phoneC.masked;
       document.querySelectorAll('#chpin-contact-choice input[name="chpin-contact"]').forEach(r => { r.checked = false; });
       document.querySelectorAll('#chpin-contact-choice .role-card').forEach(c => c.classList.remove('selected'));
       _stepUp.target = null;
       _stepUp.type   = null;
     } else if (emailC || phoneC) {
-      const entry  = emailC || phoneC;
-      const keepEm = entry.type === 'email';
-      if (emailCard) emailCard.style.display = keepEm  ? '' : 'none';
-      if (phoneCard) phoneCard.style.display = keepEm  ? 'none' : '';
+      if (choice) choice.style.display = 'none';
+      if (single) single.style.display = 'flex';
+      const entry     = emailC || phoneC;
+      const typeLabel = entry.type === 'email' ? t('profile.email') : t('profile.phone');
+      document.querySelector('#chpin-contact-single-type').textContent   = typeLabel;
+      document.querySelector('#chpin-contact-single-target').textContent = entry.masked;
       selectStepUpContact(entry);
-    } else if (choice) {
-      choice.style.display = 'none';
+    } else {
+      if (choice) choice.style.display = 'none';
+      if (single) single.style.display = 'none';
     }
     document.querySelector('#chpin-code-block')?.classList.add('hidden');
     codeInputs.forEach(i => { i.value = ''; i.classList.remove('filled', 'error'); });
@@ -225,7 +248,7 @@ export function wireChangePin(ctx) {
     document.querySelector('#chpin-code-block')?.classList.remove('hidden');
     // Refresh wizard step (на случай если зовут из другого места).
     setChpinStep(1);
-    _guard?.refresh();
+    refreshBothGuards();
   }
 
   function exitStepUp() {

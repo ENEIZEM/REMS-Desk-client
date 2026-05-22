@@ -152,10 +152,11 @@ function hideAlert(id) {
   };
 
   // ── Invite-token предзаполнение ───────────────────────────────
-  // URL вида /register?invite=<hex32+>. До любых других init шагов
-  // дёргаем мета-эндпоинт: если ok → fixe org_id, force role=employee,
-  // pre-fill контакт. Если 404 → показываем toast и продолжаем как
-  // обычная регистрация (юзер сам выберет роль).
+  // URL вида /register?invite=<hex32+>. Дёргаем мета-эндпоинт: если ok →
+  // показываем trust-block с инфо орг + force role=employee + pre-fill
+  // email (но НЕ readonly). Если юзер поменяет email на свой → вернёмся
+  // в обычный режим регистрации (с ролями + org-name/org-id полями).
+  let inviteMeta = null;
   try {
     const inviteToken = new URLSearchParams(location.search).get('invite');
     if (inviteToken && /^[a-f0-9]{32,128}$/i.test(inviteToken)) {
@@ -163,48 +164,126 @@ function hideAlert(id) {
         headers: { 'X-Device-Id': await (await import('../api.js')).getDeviceId() },
       });
       if (metaResp.ok) {
-        const meta = (await metaResp.json())?.data;
-        if (meta?.organization_id) {
+        inviteMeta = (await metaResp.json())?.data;
+        if (inviteMeta?.organization_id) {
           state.invite_token   = inviteToken;
-          state.invite_contact = String(meta.contact_raw || '').toLowerCase();
-          state.organization_id = Number(meta.organization_id);
-          // Pre-fill contact field + lock UI к employee.
-          const contactEl = document.querySelector('#reg-contact');
-          if (contactEl) {
-            contactEl.value = meta.contact_raw || '';
-            contactEl.readOnly = true;
-            contactEl.style.cursor = 'not-allowed';
+          state.invite_contact = String(inviteMeta.contact_raw || '').toLowerCase().trim();
+          // ── Trust-block: orgs/role info ──────────────────────
+          const trustEl   = q('#invite-trust');
+          const orgEl     = q('#invite-trust-org');
+          const orgIdEl   = q('#invite-trust-org-id');
+          const logoEl    = q('#invite-trust-logo');
+          if (orgEl)   orgEl.textContent   = inviteMeta.organization_name || '—';
+          if (orgIdEl) orgIdEl.textContent = String(inviteMeta.organization_id);
+          if (logoEl && inviteMeta.organization_logo) {
+            logoEl.innerHTML = `<img src="${inviteMeta.organization_logo}" alt="" style="width:100%; height:100%; object-fit:cover;">`;
           }
-          const orgIdEl = document.querySelector('#org-id');
-          if (orgIdEl) {
-            orgIdEl.value = String(meta.organization_id);
-            orgIdEl.readOnly = true;
-            orgIdEl.style.cursor = 'not-allowed';
-          }
-          // Лочим роль на employee и выбираем её радио.
-          const employeeRadio = document.querySelector('input[name="role"][value="employee"]');
-          if (employeeRadio) {
-            employeeRadio.checked = true;
-            selectedRole = 'employee';
-            // Подсветить выбранную карточку + скрыть остальные роли
-            // (юзер не должен случайно переключиться на owner).
-            document.querySelectorAll('.role-card').forEach(card => {
-              const v = card.querySelector('input[name="role"]')?.value;
-              if (v === 'employee') {
-                card.classList.add('selected');
-              } else {
-                card.style.display = 'none';
-              }
-            });
-          }
-          // Подсветить org-id row, скрыть org-name row.
-          document.querySelector('#org-name')?.closest('.form-group')?.classList.add('hidden');
+          if (trustEl) { trustEl.classList.remove('hidden'); trustEl.style.display = 'block'; }
+          // Pre-fill контакт (EDITABLE — юзер может поменять).
+          const contactInput = q('#reg-contact');
+          if (contactInput) contactInput.value = inviteMeta.contact_raw || '';
+          enterInviteMode();
         }
       }
     }
   } catch (e) {
     console.warn('[register] invite meta fetch failed:', e);
   }
+
+  // Переход в invite-mode: скрываем role-grid (роль = employee) + поля
+  // org-name/org-id (значения зафиксированы invite-токеном).
+  function enterInviteMode() {
+    state.role = 'employee';
+    selectedRole = 'employee';
+    state.organization_id = inviteMeta ? Number(inviteMeta.organization_id) : null;
+    // Force-check radio + dispatch change → запускает существующий
+    // listener (он апдейтит selectedRole, .selected class'ы и т.д.).
+    const employeeRadio = document.querySelector('input[name="role"][value="employee"]');
+    if (employeeRadio) {
+      employeeRadio.checked = true;
+      employeeRadio.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    // #org-id — programmatic fill + input event для form-guard.
+    const orgIdInput = document.querySelector('#org-id');
+    if (orgIdInput && inviteMeta) {
+      orgIdInput.value = String(inviteMeta.organization_id);
+      orgIdInput.dispatchEvent(new Event('input',  { bubbles: true }));
+      orgIdInput.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    // #reg-contact pre-filled выше — дёрнем input event на случай если
+    // form-guard ещё не инициализирован и пропустит первичный refresh.
+    document.querySelector('#reg-contact')?.dispatchEvent(new Event('input', { bubbles: true }));
+    // Подсветка employee-card.
+    document.querySelectorAll('.role-card').forEach(card => {
+      const r = card.querySelector('input[name="role"]');
+      card.classList.toggle('selected', !!r?.checked);
+    });
+    // Скрываем role-section + org-name/org-id form-groups.
+    const roleSection = document.querySelector('.role-grid')?.closest('.form-group');
+    if (roleSection)     roleSection.classList.add('hidden');
+    document.querySelector('#org-name-group')?.classList.add('hidden');
+    document.querySelector('#org-id-group')?.classList.add('hidden');
+    document.querySelector('#invite-mismatch')?.classList.add('hidden');
+    document.querySelector('#invite-mismatch')?.style.setProperty('display', 'none');
+    // Form-guard refresh — может ещё не быть инициализирован, поэтому
+    // дёргаем и через task queue (после init), и сразу.
+    if (typeof guardStep1 !== 'undefined') guardStep1?.refresh?.();
+    setTimeout(() => guardStep1?.refresh?.(), 0);
+  }
+
+  // Выход из invite-mode: юзер поменял email на не-совпадающий → ведём
+  // как обычную регистрацию (с выбором роли + полями org). КРИТИЧНО:
+  // снять `hidden` со ВСЕХ form-group-ов которые мы прятали в enterInviteMode
+  // (role-grid, org-name-group, org-id-group), иначе они остаются невидимы
+  // и юзер не может выбрать роль/ввести org_id → Next залочена form-guard'ом.
+  function exitInviteMode() {
+    state.invite_contact = '';
+    state.role = '';
+    selectedRole = null;
+    state.organization_id = null;
+    document.querySelectorAll('input[name="role"]').forEach(r => { r.checked = false; });
+    document.querySelectorAll('.role-card').forEach(c => c.classList.remove('selected'));
+    const roleSection = document.querySelector('.role-grid')?.closest('.form-group');
+    if (roleSection) roleSection.classList.remove('hidden');
+    // Возвращаем поля org. ROLE-listener (см. ниже) включит нужное из
+    // двух (#org-name-group или #org-id-group) в зависимости от выбранной
+    // роли; пока селектор пустой — пусть оба будут не-hidden, чтобы
+    // юзер сразу видел потенциальные поля.
+    const orgNameGrp = document.getElementById('org-name-group');
+    const orgIdGrp   = document.getElementById('org-id-group');
+    if (orgNameGrp) { orgNameGrp.classList.remove('hidden'); orgNameGrp.style.display = 'none'; }
+    if (orgIdGrp)   { orgIdGrp.classList.remove('hidden');   orgIdGrp.style.display   = 'none'; }
+    // Сбрасываем pre-filled org-id (был от инвайта, теперь не релевантен).
+    const orgIdInput = document.querySelector('#org-id');
+    if (orgIdInput) {
+      orgIdInput.value = '';
+      orgIdInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    document.querySelector('#invite-trust')?.classList.add('hidden');
+    document.querySelector('#invite-trust')?.style.setProperty('display', 'none');
+    document.querySelector('#invite-mismatch')?.classList.remove('hidden');
+    document.querySelector('#invite-mismatch')?.style.setProperty('display', 'flex');
+    setTimeout(() => guardStep1?.refresh?.(), 0);
+  }
+
+  // Listener на email: если в invite-mode и юзер поменял на не-совпадающий —
+  // переходим в regular. Если потом ввёл обратно совпадение — возвращаемся в invite.
+  document.querySelector('#reg-contact')?.addEventListener('input', () => {
+    if (!inviteMeta) return;
+    const current = String(document.querySelector('#reg-contact')?.value || '')
+      .toLowerCase().trim().replace(/[\s\-().]/g, '');
+    const expected = String(inviteMeta.contact_raw || '')
+      .toLowerCase().trim().replace(/[\s\-().]/g, '');
+    const inInvite = !document.querySelector('#invite-trust')?.classList.contains('hidden');
+    if (current === expected && !inInvite) {
+      // Вернули правильный контакт → invite-mode снова.
+      document.querySelector('#invite-trust')?.classList.remove('hidden');
+      document.querySelector('#invite-trust')?.style.setProperty('display', 'block');
+      enterInviteMode();
+    } else if (current !== expected && inInvite) {
+      exitInviteMode();
+    }
+  });
 
   // ── Code-input controller (step 2) ───────────────────────────
   // The wiring (auto-advance, paste, backspace, resend countdown)
@@ -466,15 +545,21 @@ function hideAlert(id) {
   // STEP 3 — Personal info & finish
   // ─────────────────────────────────────────────────────────────
 
-  // Password visibility toggle
-  q('#toggle-reg-pw')?.addEventListener('click', () => {
-    const pw = q('#reg-password');
-    if (!pw) return;
-    const show = pw.type === 'password';
-    pw.type = show ? 'text' : 'password';
-    const icon = q('#reg-pw-icon');
-    if (icon) icon.className = show ? 'ph ph-eye-slash' : 'ph ph-eye';
-  });
+  // Password visibility toggle — обе кнопки (новый + повтор)
+  // через единый паттерн «найди соседний input в .input-wrap».
+  function wirePwToggle(btnId, inputId) {
+    const btn = q('#' + btnId);
+    const inp = q('#' + inputId);
+    if (!btn || !inp) return;
+    btn.addEventListener('click', () => {
+      const show = inp.type === 'password';
+      inp.type = show ? 'text' : 'password';
+      const icon = btn.querySelector('i');
+      if (icon) icon.className = show ? 'ph ph-eye-slash' : 'ph ph-eye';
+    });
+  }
+  wirePwToggle('toggle-reg-pw',  'reg-password');
+  wirePwToggle('toggle-reg-pw2', 'reg-password2');
 
   // Password strength bar
   q('#reg-password')?.addEventListener('input', () => {

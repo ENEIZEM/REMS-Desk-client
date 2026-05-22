@@ -9,6 +9,10 @@
   <link rel="stylesheet" href="../vendor/phosphor/regular.css">
   <link rel="stylesheet" href="../vendor/phosphor/fill.css">
   <link rel="stylesheet" href="../style.css">
+  <!-- Vanta + three для hero-фона. defer = не блокирует first paint;
+       inline-init ниже polls для VANTA. -->
+  <script defer src="../vendor/three.r134.min.js"></script>
+  <script defer src="../vendor/vanta.waves.min.js"></script>
   <!-- Already-authenticated users land straight on the dashboard
        instead of flashing the login form before requireGuest() runs. -->
   <script>
@@ -19,19 +23,22 @@
     } catch (_) {}
   </script>
 </head>
-<body class="auth-page">
+<body class="auth-page auth-page--hero">
 
-<!-- ── Header ────────────────────────────────────────────────── -->
-<header class="auth-header">
-  <a href="/" class="auth-brand">
-    <div class="auth-brand-logo"><i class="ph ph-wrench"></i></div>
-    <span class="auth-brand-name">REMS</span>
-  </a>
+<!-- Hero-фон под прозрачным blur-слоем. Тот же VANTA.WAVES что на
+     landing — единый визуальный язык. -->
+<div id="auth-hero-bg" aria-hidden="true"></div>
+<div id="auth-hero-blur" aria-hidden="true"></div>
+
+<!-- Floating corner lang switcher — заменяет полноразмерный header.
+     Frosted-glass капсула в правом верхнем углу, точно как у PIN-lock
+     overlay'я. -->
+<div class="auth-corner-lang">
   <div class="lang-switcher">
     <button type="button" class="lang-btn active" data-lang="ru">RU</button>
     <button type="button" class="lang-btn"        data-lang="en">EN</button>
   </div>
-</header>
+</div>
 
 <!-- ── Main ──────────────────────────────────────────────────── -->
 <main class="auth-container">
@@ -331,6 +338,28 @@
 </main>
 
 <div id="toast-container"></div>
+
+<!-- Init Vanta WAVES on the hero background. Same params as landing
+     для единого visual. -->
+<script>
+  (function initAuthVanta(retries) {
+    if (typeof VANTA !== 'undefined' && typeof THREE !== 'undefined') {
+      VANTA.WAVES({
+        el: '#auth-hero-bg',
+        mouseControls: true,
+        touchControls: true,
+        gyroControls: false,
+        minHeight: 200, minWidth: 200,
+        scale: 1.0, scaleMobile: 1.0,
+        color: 0x1a2842, shininess: 20.0,
+        waveHeight: 18, waveSpeed: 0.85, zoom: 0.95,
+      });
+      return;
+    }
+    if (retries <= 0) return;
+    setTimeout(() => initAuthVanta(retries - 1), 100);
+  })(50);
+</script>
 
 <script type="module" src="../js/pages/login.js"></script>
 </body>

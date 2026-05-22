@@ -19,15 +19,23 @@ export function renderProfileTab(user, role, isOwner, ownerOrgCreatedAt) {
   document.querySelector('#profile-head-email').textContent    = user.email_masked || '';
   document.querySelector('#profile-head-phone').textContent    = user.phone_masked || '';
 
-  // Role + status pills — both use the icon+text badge style
-  renderIconBadge(document.querySelector('#profile-role-badge'), roleBadgeDescriptor(role));
+  // Identity-strip badges. По решению UX:
+  //   • Status (заявка отклонена/принята/и т.д.) — НЕ показываем в шапке
+  //     профиля никогда: эта инфа уже передана через uведомление и видна
+  //     на solo home.
+  //   • Role (Руководитель/Сотрудник) — показываем ТОЛЬКО когда юзер
+  //     реально в орге (status=approved). Solo юзер (no org, pending,
+  //     rejected) → ничего, шапка без chip'ов.
+  const roleEl   = document.querySelector('#profile-role-badge');
   const statusEl = document.querySelector('#profile-status-badge');
-  if (statusEl) {
-    if (isOwner) {
-      statusEl.style.display = 'none';
+  if (statusEl) statusEl.style.display = 'none';
+  if (roleEl) {
+    const showRole = user.membership_status === 'approved' && !!role;
+    if (showRole) {
+      roleEl.style.display = '';
+      renderIconBadge(roleEl, roleBadgeDescriptor(role));
     } else {
-      statusEl.style.display = '';
-      renderIconBadge(statusEl, statusBadge(user.membership_status));
+      roleEl.style.display = 'none';
     }
   }
 

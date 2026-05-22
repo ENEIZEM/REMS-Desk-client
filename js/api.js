@@ -223,6 +223,13 @@ export const profile = {
 export const membership = {
   status:  () => request('GET',  '/users/membership/status'),
   reapply: () => request('POST', '/users/membership/reapply', {}),
+  /** Solo-юзер запрашивает membership в орге по ID. message — опционально. */
+  join:    (organization_id, message) => request('POST', '/users/membership/join', {
+    organization_id,
+    ...(message ? { message } : {}),
+  }),
+  /** Отменить pending-заявку. Юзер возвращается в чистое solo состояние. */
+  cancel:  () => request('DELETE', '/users/membership/me'),
 };
 
 // ─────────────────────────────────────────────────────────────────

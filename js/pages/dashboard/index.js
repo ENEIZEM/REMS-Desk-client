@@ -78,7 +78,7 @@ if (!consumePinPass()) {
 // inside the Overview tab via #overview-notifs. Keeping the legacy
 // hash alias `#notifications` is handled below (it redirects to
 // overview so old toast → href links don't 404).
-const TAB_IDS = ['overview', 'requests', 'equipment', 'members', 'org', 'profile'];
+const TAB_IDS = ['overview', 'requests', 'catalog', 'partners', 'members', 'org', 'profile', 'solo-home', 'equipment'];
 let currentTab = 'overview';
 
 function switchTab(name, { updateHash = true } = {}) {
@@ -120,7 +120,16 @@ document.querySelectorAll('[data-tab-trigger]').forEach(btn => {
 // "Профиль" link → /pages/dashboard.html#profile) AND on hashchange
 // (e.g. user presses Back).
 function applyHashTab() {
-  const tab = (location.hash || '').replace(/^#/, '');
+  // Hash может быть «#profile?section=sessions» или «#requests/42» —
+  // обрезаем после первого '?' / '/' до базового имени вкладки.
+  let tab = (location.hash || '').replace(/^#/, '');
+  tab = tab.split(/[?\/]/)[0];
+  // Для solo-юзера переходы на скрытые вкладки (overview/requests/etc)
+  // редиректим на их главную = solo-home.
+  if (document.body.dataset.role === 'solo' && tab !== 'solo-home' && tab !== 'profile') {
+    switchTab('solo-home', { updateHash: false });
+    return;
+  }
   if (TAB_IDS.includes(tab)) switchTab(tab, { updateHash: false });
 }
 window.addEventListener('hashchange', applyHashTab);
@@ -304,6 +313,66 @@ async function loadProfile() {
     _availableContacts  = Array.isArray(resp.data?.available_contacts)
       ? resp.data.available_contacts
       : [];
+
+    // ── Role-router: определяем роль и mount'им соответствующий
+    // дашборд. Re-mount триггерится КАЖДЫЙ раз когда:
+    //   • роль изменилась (solo → employee после approve),
+    //   • ИЛИ остаёмся solo, но membership_status изменился
+    //     (null → pending после join, rejected → null после leave) —
+    //     solo home должен перерисовать badge и кнопку.
+    // location.reload() намеренно НЕ используем — он триггерит PIN-gate
+    // (referrer пустой/dashboard). In-place re-mount чище.
+    try {
+      const profileResponse = { user, organization: org, membership: resp.data?.membership };
+      const { detectRole, applyRoleAttributes, loadDashboardForRole } =
+        await import('./role-router.js');
+      const detectedRole   = detectRole(profileResponse);
+      const currentRole    = document.body.dataset.role;
+      const currentStatus  = document.body.dataset.membership || '';
+      const newStatus      = String(user.membership_status || '');
+      const roleChanged    = detectedRole !== currentRole;
+      const statusChanged  = newStatus !== currentStatus;
+      if (!window.__remsRoleBooted || roleChanged || (detectedRole === 'solo' && statusChanged)) {
+        const wasBooted = window.__remsRoleBooted;
+        window.__remsRoleBooted = true;
+        // КРИТИЧНО при смене дашборда: предыдущий orchestrator мог
+        // выставить inline style.display='none' на tab-panels и
+        // nav-items (hide() из role-helpers.js). Эти inline styles
+        // overrideят CSS .active rule — switchTab() для новой роли
+        // не сможет показать нужную панель. Сбрасываем все
+        // tab-panel inline-display перед сменой роли.
+        if (roleChanged) {
+          document.querySelectorAll('.tab-panel').forEach(el => {
+            el.style.display = '';
+            el.classList.remove('hidden');
+          });
+          document.querySelectorAll('.nav-item').forEach(el => {
+            el.style.display = '';
+            el.classList.remove('hidden');
+          });
+          // org-nav-section тоже скрыт у solo — открываем обратно для
+          // employee/owner (их оркестратор сам решит видимость).
+          const orgNav = document.querySelector('#org-nav-section');
+          if (orgNav) orgNav.style.display = '';
+          // Restore «Обзор» tab-link если был переименован в «Главная»
+          // в solo dashboard (data-tab переключался на solo-home).
+          const homeBtn = document.querySelector('.nav-item[data-tab="solo-home"]');
+          if (homeBtn) {
+            homeBtn.dataset.tab = 'overview';
+            const span = homeBtn.querySelector('span');
+            if (span) span.textContent = t('nav.dashboard') || 'Обзор';
+          }
+        }
+        applyRoleAttributes(detectedRole, user.membership_status);
+        const boot = await loadDashboardForRole(detectedRole);
+        boot?.(profileResponse);
+        if (!wasBooted || roleChanged) {
+          switchTab(detectedRole === 'solo' ? 'solo-home' : 'overview');
+        }
+      }
+    } catch (e) {
+      console.error('[role-router] failed:', e);
+    }
 
     const role     = user.org_role || user.role;
     const isOwner  = role === 'owner';
@@ -720,6 +789,12 @@ async function manageMember(userId, action) {
 
 q('#btn-invite')?.addEventListener('click', () => openModal('invite-modal'));
 
+// Form-guard: серая кнопка пока контакт не введён.
+wireFormGuard({
+  button:   '#btn-invite-confirm',
+  required: [{ sel: '#invite-contact', kind: 'text' }],
+});
+
 q('#btn-invite-confirm')?.addEventListener('click', async () => {
   const contact = q('#invite-contact')?.value.trim();
 
@@ -798,6 +873,12 @@ async function initSocketConn() {
       if (MEMBERSHIP_REFRESH_TYPES.has(payload?.type)) {
         loadProfile();
       }
+      // Owner получает join_request как user:notification (recipientId=ownerId),
+      // НЕ как org-wide. Поэтому Members tab refresh тоже здесь —
+      // иначе pending applicant появляется только после reopen tab.
+      if (payload?.type === 'join_request' && currentTab === 'members') {
+        loadMembers().catch(() => {});
+      }
     });
 
     // Org-wide push — no toast (it can flood when many events fire);
@@ -854,6 +935,18 @@ onLangChange(() => {
 // ─────────────────────────────────────────────────────────────────
 loadProfile();
 initSocketConn().catch(() => {});
+
+// ─── In-page profile reload trigger ─────────────────────────────
+// Любая модалка / экран, который изменил состояние юзера через бэк
+// (например solo join-modal: organization_id + status -> pending),
+// диспатчит событие 'rems:reload-profile'. Здесь оно превращается
+// в loadProfile() — НЕ перезагрузку страницы (location.reload()
+// триггерит PIN-gate, потому что referrer пустой/dashboard).
+// loadProfile() в свою очередь вызовет role-router, который сравнит
+// новую роль с активной и re-mount'ит соответствующий дашборд.
+window.addEventListener('rems:reload-profile', () => {
+  loadProfile().catch(err => console.warn('[reload-profile]', err));
+});
 
 // ─────────────────────────────────────────────────────────────────
 // UTILS

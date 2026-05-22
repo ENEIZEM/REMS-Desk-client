@@ -60,3 +60,7 @@ export function hideAlertById(id) {
   a.classList.remove('show');
   a.classList.add('hidden');
 }
+
+// (Modal-header lang switcher был удалён по запросу — лангсвитчер
+// живёт в основном navbar'е, который поднят z-index'ом над
+// modal-backdrop, см. CSS .navbar.)

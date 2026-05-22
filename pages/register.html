@@ -9,6 +9,8 @@
   <link rel="stylesheet" href="../vendor/phosphor/regular.css">
   <link rel="stylesheet" href="../vendor/phosphor/fill.css">
   <link rel="stylesheet" href="../style.css">
+  <script defer src="../vendor/three.r134.min.js"></script>
+  <script defer src="../vendor/vanta.waves.min.js"></script>
   <!-- Already-authenticated users hopping in from a landing CTA never
        need to see the registration form — short-circuit straight to
        the dashboard before the page paints. -->
@@ -20,22 +22,21 @@
     } catch (_) {}
   </script>
 </head>
-<body class="auth-page">
+<body class="auth-page auth-page--hero">
 
-<!-- ── Header ────────────────────────────────────────────────── -->
-<header class="auth-header">
-  <a href="/" class="auth-brand">
-    <div class="auth-brand-logo"><i class="ph ph-wrench"></i></div>
-    <span class="auth-brand-name">REMS</span>
-  </a>
+<div id="auth-hero-bg" aria-hidden="true"></div>
+<div id="auth-hero-blur" aria-hidden="true"></div>
+
+<!-- Floating corner lang switcher — заменяет полноразмерный header. -->
+<div class="auth-corner-lang">
   <div class="lang-switcher">
     <button type="button" class="lang-btn active" data-lang="ru">RU</button>
     <button type="button" class="lang-btn"        data-lang="en">EN</button>
   </div>
-</header>
+</div>
 
 <!-- ── Main ──────────────────────────────────────────────────── -->
-<main class="auth-container" style="align-items:flex-start; padding-top: 2.5rem; padding-bottom: 2.5rem;">
+<main class="auth-container" style="padding-top: 2.5rem; padding-bottom: 2.5rem;">
 <div class="auth-card auth-card-wide">
 
   <!-- ── Step progress track ── -->
@@ -67,6 +68,41 @@
         <h2 class="auth-title" data-i18n="auth.register.step1_title">Контакт и роль</h2>
         <p class="auth-subtitle" data-i18n="auth.register.subtitle">Создайте учётную запись</p>
       </div>
+    </div>
+
+    <!-- ─── Invite trust-block ───────────────────────────────────
+         Виден только если страница открыта по /register?invite=TOKEN
+         И введённый email/phone совпадает с приглашённым. В этом
+         состоянии юзер ДОВЕРЕННЫЙ — мы скрываем выбор роли (он
+         назначен) и поля «название организации»/«ID организации»
+         (они тоже зафиксированы). Если юзер поменяет почту на свою —
+         JS снимает этот блок и страница ведёт себя как обычная
+         регистрация (с выбором роли + org-name/org-id). -->
+    <div id="invite-trust" class="hidden" style="display:none; margin-bottom:1.25rem; padding:1rem 1.25rem; background:var(--clr-accent-light); border:1px solid var(--clr-accent); border-radius:var(--radius-lg);">
+      <div style="display:flex; align-items:center; gap:.75rem;">
+        <div id="invite-trust-logo" style="width:2.75rem; height:2.75rem; border-radius:50%; background:#fff; border:1px solid var(--clr-border); display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0; color:var(--clr-accent);">
+          <i class="ph-bold ph-buildings" style="font-size:1.4rem;"></i>
+        </div>
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:var(--text-sm); color:var(--clr-text-secondary);" data-i18n="auth.invite.role_label">Ваша роль в системе: сотрудник</div>
+          <div style="display:flex; gap:.5rem; align-items:baseline; margin-top:.15rem;">
+            <strong id="invite-trust-org" style="color:var(--clr-text-primary); font-size:var(--text-base);">—</strong>
+            <span style="font-size:var(--text-xs); color:var(--clr-text-muted);">
+              <span data-i18n="auth.invite.org_id_prefix">ID:</span>
+              <span id="invite-trust-org-id">—</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── Mismatch warning ────────────────────────────────────
+         Появляется если юзер поменял приглашённую почту на свою.
+         Скрывает invite-trust и переключает страницу в обычную
+         регистрацию: появятся карточки ролей + поля org-name/id. -->
+    <div id="invite-mismatch" class="alert alert-warning hidden" role="status" style="display:none; align-items:center; gap:.6rem; margin-bottom:1.25rem;">
+      <i class="ph ph-warning" style="margin-top:.15rem; flex-shrink:0;"></i>
+      <span data-i18n="auth.invite.mismatch_notice">Вы изменили email из приглашения — заявка пойдёт на одобрение руководителю в обычном порядке.</span>
     </div>
 
     <div style="display:flex; flex-direction:column; gap:1.25rem;">
@@ -306,6 +342,9 @@
           <input id="reg-password2" type="password" class="form-input" autocomplete="new-password"
             data-i18n-ph="auth.register.pass2_ph"
             placeholder="Повторите пароль">
+          <button type="button" class="input-action" id="toggle-reg-pw2" tabindex="-1">
+            <i class="ph ph-eye"></i>
+          </button>
         </div>
         <div class="form-error" id="err-reg-password2"><i class="ph ph-warning-circle"></i><span></span></div>
       </div>
@@ -366,6 +405,24 @@
 </main>
 
 <div id="toast-container"></div>
+
+<!-- Init Vanta WAVES — единый visual с landing/login. -->
+<script>
+  (function initAuthVanta(retries) {
+    if (typeof VANTA !== 'undefined' && typeof THREE !== 'undefined') {
+      VANTA.WAVES({
+        el: '#auth-hero-bg',
+        mouseControls: true, touchControls: true, gyroControls: false,
+        minHeight: 200, minWidth: 200, scale: 1.0, scaleMobile: 1.0,
+        color: 0x1a2842, shininess: 20.0,
+        waveHeight: 18, waveSpeed: 0.85, zoom: 0.95,
+      });
+      return;
+    }
+    if (retries <= 0) return;
+    setTimeout(() => initAuthVanta(retries - 1), 100);
+  })(50);
+</script>
 
 <script type="module" src="../js/pages/register.js"></script>
 </body>

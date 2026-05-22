@@ -98,6 +98,9 @@
   </div>
 </div>
 
+<!-- (Modal-level lang switcher теперь вставляется JS-ом в каждый
+     .modal-header — см. ui-helpers.js → injectModalLangSwitchers.) -->
+
 <!-- ── Sidebar toggle (floating square, top-left) ──────────────────
      Pulled OUT of the navbar so it sits in its own frosted-glass tile
      at the very top-left corner — same chrome the navbar wears. Clicking
@@ -195,6 +198,8 @@
     <nav>
       <div class="nav-section">
         <p class="nav-section-label" data-i18n="app.name">REMS</p>
+        <!-- Solo: «Главная». Owner/Employee: «Обзор». Подменяется JS-ом
+             в solo dashboard'е (см. dashboards/solo/index.js). -->
         <button class="nav-item active" data-tab="overview">
           <i class="ph ph-squares-four"></i>
           <span data-i18n="nav.dashboard">Обзор</span>
@@ -203,9 +208,16 @@
           <i class="ph ph-clipboard-text"></i>
           <span data-i18n="nav.requests">Заявки</span>
         </button>
-        <button class="nav-item" data-tab="equipment">
+        <!-- Каталог (оборудование + категории). Owner — CRUD,
+             employee — read-only. Solo не видит. -->
+        <button class="nav-item" data-tab="catalog">
           <i class="ph ph-desktop-tower"></i>
-          <span data-i18n="nav.equipment">Оборудование</span>
+          <span data-i18n="nav.catalog">Каталог</span>
+        </button>
+        <!-- Партнёры (контракты) — только owner. -->
+        <button class="nav-item" data-tab="partners" data-role-only="owner">
+          <i class="ph ph-handshake"></i>
+          <span data-i18n="nav.partners">Партнёры</span>
         </button>
       </div>
 
@@ -213,6 +225,7 @@
         <p class="nav-section-label" data-i18n="nav.organization_section">Организация</p>
         <button class="nav-item" data-tab="members" id="nav-item-members">
           <i class="ph ph-users"></i>
+          <!-- Owner видит «Сотрудники», employee — «Коллеги». Подмена в i18n. -->
           <span data-i18n="nav.members">Сотрудники</span>
         </button>
         <button class="nav-item" data-tab="org" id="nav-item-org" style="display:none;">
@@ -239,6 +252,12 @@
         <h1 class="page-title" id="welcome-title" data-i18n="dashboard.welcome">Добро пожаловать</h1>
         <p class="page-desc" data-i18n="dashboard.overview_desc">Сводка активности и последние уведомления</p>
       </div>
+
+      <!-- Role-scoped overview content slots. Заполняются JS-ом из
+           dashboards/owner/overview.js или employee/overview.js.
+           Если оба пусты — рендерится старый stats-row ниже (fallback). -->
+      <div id="owner-overview-slot" data-role-only="owner"></div>
+      <div id="employee-overview-slot" data-role-only="employee"></div>
 
       <!-- Stats row -->
       <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:1rem; margin-bottom:2rem;">
@@ -327,28 +346,25 @@
 
     <!-- ══ TAB: Requests ════════════════════════════════════════ -->
     <div class="tab-panel" id="tab-requests">
-      <div class="page-header">
-        <h1 class="page-title" data-i18n="nav.requests">Заявки</h1>
-        <p class="page-desc" data-i18n="dashboard.requests_desc">Управление заявками: создание, обработка, история</p>
-      </div>
-      <div class="empty-state" style="margin-top:4rem;">
-        <i class="ph ph-clipboard-text"></i>
-        <p class="empty-state-title">Раздел в разработке</p>
-        <p class="empty-state-text">Управление заявками будет доступно в следующей версии.</p>
-      </div>
+      <!-- Slots заполняются owner/employee orchestrator'ом. -->
+      <div id="owner-requests-slot"    data-role-only="owner"></div>
+      <div id="employee-requests-slot" data-role-only="employee"></div>
     </div>
 
-    <!-- ══ TAB: Equipment ══════════════════════════════════════ -->
-    <div class="tab-panel" id="tab-equipment">
-      <div class="page-header">
-        <h1 class="page-title" data-i18n="nav.equipment">Оборудование</h1>
-        <p class="page-desc" data-i18n="dashboard.equipment_desc">Реестр оргтехники: модели, сроки гарантии, история обслуживания</p>
-      </div>
-      <div class="empty-state" style="margin-top:4rem;">
-        <i class="ph ph-desktop-tower"></i>
-        <p class="empty-state-title">Раздел в разработке</p>
-        <p class="empty-state-text">Учёт оборудования будет доступен в следующей версии.</p>
-      </div>
+    <!-- ══ TAB: Catalog (бывший Equipment + категории) ══════════ -->
+    <div class="tab-panel" id="tab-catalog">
+      <div id="owner-catalog-slot"    data-role-only="owner"></div>
+      <div id="employee-catalog-slot" data-role-only="employee"></div>
+    </div>
+
+    <!-- ══ TAB: Partners (только owner) ═════════════════════════ -->
+    <div class="tab-panel" id="tab-partners" data-role-only="owner">
+      <div id="owner-partners-slot"></div>
+    </div>
+
+    <!-- ══ TAB: Solo home (только для юзера без орги) ═══════════ -->
+    <div class="tab-panel" id="tab-solo-home" data-role-only="solo">
+      <div id="solo-home-slot"></div>
     </div>
 
     <!-- Notifications tab REMOVED — the full notifications feed now
@@ -714,7 +730,7 @@
                   </button>
                 </span>
               </div>
-              <div class="profile-row">
+              <div class="profile-row" style="border-bottom:none;">
                 <span class="profile-row-label">Telegram</span>
                 <span class="profile-row-edit-wrap">
                   <button class="btn btn-row-action btn-row-link" id="btn-link-telegram" data-tooltip-key="profile.telegram_coming_soon">
@@ -723,15 +739,13 @@
                   </button>
                 </span>
               </div>
-              <div class="profile-row" style="border-bottom:none;">
-                <span class="profile-row-label" data-i18n="profile.role_in_org">Ваша роль в организации</span>
-                <span class="profile-row-edit-wrap">
-                  <span id="info-role" class="badge badge-default">—</span>
-                  <span class="profile-card-tooltip hidden" id="info-role-tooltip" tabindex="0" style="margin-left:.25rem;">
-                    <i class="ph ph-info"></i>
-                  </span>
-                </span>
-              </div>
+              <!-- «Ваша роль в организации» убрана — роль теперь живёт
+                   во вкладке «Организация» / «Моя организация». -->
+              <!-- Скрытый span сохранён для backward-compat с loadProfile()
+                   и тултипом отказа (membership_status badge), но не
+                   рендерится. -->
+              <span id="info-role" class="hidden" style="display:none;">—</span>
+              <span id="info-role-tooltip" class="hidden" style="display:none;"></span>
             </div>
           </div>
         </div>
@@ -775,14 +789,13 @@
                 <span class="profile-row-label" data-i18n="profile.last_login">Последний вход</span>
                 <span class="profile-row-value" id="info-last-login">—</span>
               </div>
-              <div class="profile-row">
+              <div class="profile-row" style="border-bottom:none;">
                 <span class="profile-row-label" data-i18n="profile.in_org_since">В организации с</span>
                 <span class="profile-row-value" id="info-joined">—</span>
               </div>
-              <div class="profile-row" style="border-bottom:none;">
-                <span class="profile-row-label" data-i18n="profile.sessions">Активные сессии</span>
-                <span class="profile-row-value" id="sessions-count">—</span>
-              </div>
+              <!-- Скрытый sessions-count для backward-compat с loadProfile();
+                   полноразмерная карточка «Активные сессии» ниже остаётся. -->
+              <span id="sessions-count" class="hidden" style="display:none;">—</span>
             </div>
           </div>
         </div>
@@ -812,6 +825,85 @@
 </div>
 
 <!-- ── Invite member modal ──────────────────────────────────────── -->
+<!-- ── Solo: подтверждение отмены pending-заявки ───────────────
+     Открывается из solo home когда юзер уже pending и нажал
+     «Отменить запрос». На confirm — DELETE /api/users/membership/me. -->
+<div class="modal-backdrop" id="cancel-request-modal">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <div class="modal-card-icon danger"><i class="ph-bold ph-x-circle"></i></div>
+      <div class="modal-header-text">
+        <h3 class="modal-title" data-i18n="solo.cancel_modal_title">Отменить заявку?</h3>
+      </div>
+      <button class="modal-close" data-close-modal="cancel-request-modal"><i class="ph ph-x"></i></button>
+    </div>
+    <div class="modal-body">
+      <p style="margin:0; font-size:var(--text-sm); color:var(--clr-text-secondary);">
+        <span data-i18n="solo.cancel_modal_body">Вы отменяете запрос на вступление в</span>
+        <strong id="cancel-req-target" style="color:var(--clr-text-primary);">—</strong>.
+        <span data-i18n="solo.cancel_modal_warn">Руководитель больше не увидит вашу заявку. Вы сможете подать новую в любую организацию.</span>
+      </p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" id="btn-cancel-request-confirm">
+        <span data-i18n="solo.cancel_modal_confirm">Отменить заявку</span>
+      </button>
+      <button class="btn btn-secondary" data-close-modal="cancel-request-modal" data-i18n="common.cancel">Отмена</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Solo: запрос членства в орге ─────────────────────────────
+     Открывается из solo home (кнопка «Вступить по ID»). Юзер вводит
+     org_id и (опционально) сообщение для руководителя. Бэк создаёт
+     pending-membership + отправляет owner-у уведомление с этим текстом. -->
+<div class="modal-backdrop" id="join-org-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-card-icon navy"><i class="ph-bold ph-sign-in"></i></div>
+      <div class="modal-header-text">
+        <h3 class="modal-title" data-i18n="solo.join_modal_title">Запрос на вступление</h3>
+        <p class="modal-subtitle" data-i18n="solo.join_modal_subtitle">Введите ID организации и (по желанию) сообщение руководителю.</p>
+      </div>
+      <button class="modal-close" data-close-modal="join-org-modal"><i class="ph ph-x"></i></button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex; flex-direction:column; gap:1rem;">
+        <div class="form-group">
+          <label class="form-label" for="join-org-id">
+            <span data-i18n="solo.join_org_id_label">ID организации</span>
+            <span class="req">*</span>
+          </label>
+          <div class="input-wrap">
+            <i class="ph ph-hash input-icon"></i>
+            <input id="join-org-id" type="number" min="1" class="form-input"
+                   placeholder="42" autocomplete="off">
+          </div>
+          <div class="form-error" id="err-join-org-id"><i class="ph ph-warning-circle"></i><span></span></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="join-org-message" data-i18n="solo.join_message_label">Сообщение руководителю (необязательно)</label>
+          <textarea id="join-org-message" class="form-input" rows="3" maxlength="500"
+                    data-i18n-ph="solo.join_message_ph"
+                    placeholder="Я Иван Петров, был у вас на собеседовании…"></textarea>
+          <div class="form-helper" style="display:flex; justify-content:space-between; font-size:var(--text-xs); color:var(--clr-text-muted); margin-top:.25rem;">
+            <span data-i18n="solo.join_message_hint">Текст увидит руководитель в уведомлении.</span>
+            <span><span id="join-org-message-count">0</span> / 500</span>
+          </div>
+        </div>
+        <div class="alert alert-error hidden" id="err-join-org"><i class="ph ph-warning-circle"></i><span id="err-join-org-text"></span></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" id="btn-join-org-confirm">
+        <i class="ph ph-paper-plane-tilt"></i>
+        <span data-i18n="solo.btn_join_send">Отправить запрос</span>
+      </button>
+      <button class="btn btn-secondary" data-close-modal="join-org-modal" data-i18n="common.cancel">Отмена</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="invite-modal">
   <div class="modal">
     <div class="modal-header">
@@ -904,6 +996,14 @@
 
       <!-- ══ STEP 1 — pick a verified contact + current password ══ -->
       <div id="chp-step-1" class="chp-step">
+        <!-- Mode selector. Чёткий tab-control между двумя путями:
+             «Знаю пароль» (default — current_password + code в качестве 2FA)
+             vs «Забыли пароль» (только код, reset через verification). -->
+        <div class="seg-tabs" role="tablist" aria-label="Auth mode" style="margin-bottom:1.25rem;">
+          <button type="button" class="seg-tab active" id="chp-mode-known" role="tab" aria-selected="true" data-i18n="profile.mode_known_password">Знаю пароль</button>
+          <button type="button" class="seg-tab"        id="chp-mode-forgot" role="tab" aria-selected="false" data-i18n="profile.mode_forgot_password">Забыли пароль?</button>
+        </div>
+
         <div style="display:flex; flex-direction:column; gap:1rem;">
 
           <div class="form-group">
@@ -932,18 +1032,36 @@
               </label>
             </div>
 
-            <!-- Single-contact label (only one verified contact) -->
-            <p id="chp-contact-single" style="font-size:var(--text-sm); color:var(--clr-text-secondary); margin:0;">
-              <span data-i18n="profile.change_pwd_code_target">Код будет отправлен на</span>
-              <strong id="chp-contact-single-target" style="color:var(--clr-text-primary);">—</strong>
-            </p>
+            <!-- Single-contact: один верифицированный контакт. Вместо
+                 карточки — компактная двухстрочная подпись с типом
+                 контакта и маской. Никакого визуального «выбора из
+                 одного» (это путало юзеров в тестинге). -->
+            <div id="chp-contact-single" class="single-contact-line" style="display:none;">
+              <span class="single-contact-line__type" id="chp-contact-single-type">—</span>
+              <span class="single-contact-line__value" id="chp-contact-single-target">—</span>
+            </div>
+          </div>
+
+          <!-- Forgot-mode: вместо «Текущий пароль» юзер вводит ПОЛНЫЙ
+               контакт (по выбранному выше типу). Это identity-proof
+               на том же уровне, что и detach-contact / change-contact:
+               знание полного контакта подтверждает, что юзер — это юзер.
+               На бэк отправим как verification_target + код. -->
+          <div class="form-group" id="chp-forgot-contact-group" style="display:none;">
+            <label class="form-label" for="chp-forgot-contact">
+              <span data-i18n="profile.forgot_pwd_contact_label">Введите ваш контакт полностью</span>
+            </label>
+            <div class="input-wrap">
+              <i class="ph ph-at input-icon"></i>
+              <input id="chp-forgot-contact" type="text" class="form-input" autocomplete="off"
+                data-i18n-ph="profile.forgot_pwd_contact_ph"
+                placeholder="example@mail.ru или +7 999 000 00 00">
+            </div>
+            <div class="form-error" id="err-chp-forgot-contact"><i class="ph ph-warning-circle"></i><span></span></div>
           </div>
 
           <div class="form-group" id="chp-current-group">
-            <label class="form-label" for="chp-current" style="display:flex; align-items:center; justify-content:space-between;">
-              <span data-i18n="profile.current_password">Текущий пароль</span>
-              <a href="#" id="chp-forgot-link" style="font-size:var(--text-xs); font-weight:600; color:var(--clr-text-secondary);" data-i18n="profile.forgot_password">Забыли пароль?</a>
-            </label>
+            <label class="form-label" for="chp-current" data-i18n="profile.current_password">Текущий пароль</label>
             <div class="input-wrap">
               <i class="ph ph-lock-simple input-icon"></i>
               <input id="chp-current" type="password" class="form-input" autocomplete="current-password">
@@ -952,14 +1070,6 @@
               </button>
             </div>
             <div class="form-error" id="err-chp-current"><i class="ph ph-warning-circle"></i><span></span></div>
-          </div>
-          <!-- Notice shown in forgot-mode вместо current-password field. -->
-          <div id="chp-forgot-notice" class="alert alert-info hidden" role="status" style="display:none; align-items:center; gap:.6rem;">
-            <i class="ph ph-info" style="flex-shrink:0;"></i>
-            <span style="flex:1;">
-              <span data-i18n="profile.forgot_pwd_notice">Подтвердите личность кодом — новый пароль зададите на последнем шаге.</span>
-              <a href="#" id="chp-remember-link" style="font-weight:600; margin-left:.5rem;" data-i18n="profile.remember_password">Помню пароль</a>
-            </span>
           </div>
         </div>
       </div>
@@ -1031,8 +1141,8 @@
             <div class="form-error" id="err-chp-confirm"><i class="ph ph-warning-circle"></i><span></span></div>
           </div>
 
-          <div class="alert alert-warning show" style="display:flex; align-items:flex-start; gap:.6rem;">
-            <i class="ph ph-warning" style="margin-top:.15rem; flex-shrink:0;"></i>
+          <div class="alert alert-warning show" style="display:flex; align-items:center; gap:.6rem;">
+            <i class="ph ph-warning" style="flex-shrink:0;"></i>
             <span data-i18n="profile.change_pwd_session_warning">
               После смены пароля все остальные сессии (другие устройства) будут завершены. Текущий сеанс останется активным.
             </span>
@@ -1121,10 +1231,10 @@
               </div>
             </label>
           </div>
-          <p id="chpin-contact-single" style="font-size:var(--text-sm); color:var(--clr-text-secondary); margin:0;">
-            <span data-i18n="profile.change_pwd_code_target">Код будет отправлен на</span>
-            <strong id="chpin-contact-single-target" style="color:var(--clr-text-primary);">—</strong>
-          </p>
+          <div id="chpin-contact-single" class="single-contact-line" style="display:none;">
+            <span class="single-contact-line__type" id="chpin-contact-single-type">—</span>
+            <span class="single-contact-line__value" id="chpin-contact-single-target">—</span>
+          </div>
           <button type="button" class="btn btn-secondary btn-sm" id="btn-chpin-send-code" style="align-self:flex-start;">
             <i class="ph ph-paper-plane-tilt"></i>
             <span data-i18n="auth.forgot.send_code">Отправить код</span>

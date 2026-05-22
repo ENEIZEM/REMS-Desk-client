@@ -37,19 +37,26 @@ let _codeCtl       = null;     // createCodeInput(...) controller
 let _forgotMode    = false;    // true → skip current_password, use reset-password endpoint
 
 // Switch UI between «I remember the password» (default) и forgot-mode.
+// Управляется segmented-tab'ами #chp-mode-known / #chp-mode-forgot.
+// В forgot-mode прячем «Текущий пароль» и просим ПОЛНЫЙ контакт
+// (как identity-proof, аналогично detach-contact). На бэк уйдёт
+// auth.resetPassword(target, code, new_pw).
 function setForgotMode(on) {
   _forgotMode = !!on;
-  const curGroup    = document.querySelector('#chp-current-group');
-  const forgotNote  = document.querySelector('#chp-forgot-notice');
-  if (curGroup)   curGroup.style.display   = on ? 'none' : '';
-  if (forgotNote) {
-    forgotNote.style.display = on ? 'flex' : 'none';
-    forgotNote.classList.toggle('hidden', !on);
-  }
-  // Сбрасываем поле и ошибку, чтобы при возврате не остался застрявший error.
-  const curInput = document.querySelector('#chp-current');
-  if (curInput) curInput.value = '';
+  const curGroup     = document.querySelector('#chp-current-group');
+  const forgotGroup  = document.querySelector('#chp-forgot-contact-group');
+  if (curGroup)    curGroup.style.display    = on ? 'none' : '';
+  if (forgotGroup) forgotGroup.style.display = on ? '' : 'none';
+  document.querySelector('#chp-mode-known')?.classList.toggle('active', !on);
+  document.querySelector('#chp-mode-known')?.setAttribute('aria-selected', String(!on));
+  document.querySelector('#chp-mode-forgot')?.classList.toggle('active', on);
+  document.querySelector('#chp-mode-forgot')?.setAttribute('aria-selected', String(on));
+  const curInput     = document.querySelector('#chp-current');
+  const forgotInput  = document.querySelector('#chp-forgot-contact');
+  if (curInput)    curInput.value = '';
+  if (forgotInput) forgotInput.value = '';
   clearFieldErrorById('err-chp-current');
+  clearFieldErrorById('err-chp-forgot-contact');
   hideAlertById('err-chp');
   _oldPassword = '';
   _guard?.refresh();
@@ -165,43 +172,38 @@ function openChangePwdModal() {
   _code         = '';
   _codeCtl?.reset();
 
-  // Populate the contact picker. Используем единый visual: всегда
-  // .role-grid с .role-card. Если у юзера 1 контакт — скрываем неподдер-
-  // живаемую карточку и добавляем contact-picker--single (стиль —
-  // зафиксированная ширина + locked-selected look). Если 2 — обычный
-  // radio-group, обе одинаковой ширины.
+  // Populate the contact picker. 2 контакта → role-grid с обеими
+  // карточками (юзер выбирает). 1 контакт → не показываем выбор,
+  // вместо этого compact text «EMAIL / контакт» в .single-contact-line.
   const available = _ctx.getAvailableContacts();
   const choice    = document.querySelector('#chp-contact-choice');
   const single    = document.querySelector('#chp-contact-single');
   const emailC    = available.find(c => c.type === 'email');
   const phoneC    = available.find(c => c.type === 'phone');
   const both      = !!emailC && !!phoneC;
-  const emailCard = document.querySelector('#chp-contact-email-card');
-  const phoneCard = document.querySelector('#chp-contact-phone-card');
-
-  // Legacy single-label всегда прячем — мы теперь рисуем карточку.
-  if (single) single.style.display = 'none';
-  if (choice) {
-    choice.style.display = 'grid';
-    choice.classList.toggle('contact-picker--single', !both);
-  }
-  if (emailC) document.querySelector('#chp-contact-email-label').textContent = emailC.masked;
-  if (phoneC) document.querySelector('#chp-contact-phone-label').textContent = phoneC.masked;
 
   if (both) {
-    if (emailCard) emailCard.style.display = '';
-    if (phoneCard) phoneCard.style.display = '';
+    if (single) single.style.display = 'none';
+    if (choice) {
+      choice.style.display = 'grid';
+      choice.classList.remove('contact-picker--single');
+    }
+    document.querySelector('#chp-contact-email-label').textContent = emailC.masked;
+    document.querySelector('#chp-contact-phone-label').textContent = phoneC.masked;
     document.querySelectorAll('#chp-contact-choice input[name="chp-contact"]').forEach(r => { r.checked = false; });
     document.querySelectorAll('#chp-contact-choice .role-card').forEach(c => c.classList.remove('selected'));
   } else if (emailC || phoneC) {
-    const entry  = emailC || phoneC;
-    const keepEm = entry.type === 'email';
-    if (emailCard) emailCard.style.display = keepEm  ? '' : 'none';
-    if (phoneCard) phoneCard.style.display = keepEm  ? 'none' : '';
+    if (choice) choice.style.display = 'none';
+    if (single) single.style.display = 'flex';
+    const entry = emailC || phoneC;
+    const typeLabel = entry.type === 'email' ? t('profile.email') : t('profile.phone');
+    document.querySelector('#chp-contact-single-type').textContent   = typeLabel;
+    document.querySelector('#chp-contact-single-target').textContent = entry.masked;
     selectContact(entry);
   } else {
     // No verified contacts — спрячем picker полностью.
     if (choice) choice.style.display = 'none';
+    if (single) single.style.display = 'none';
   }
 
   // Открываем всегда в режиме «помню пароль» — пользователь сам нажмёт
@@ -222,13 +224,29 @@ async function chpNext() {
       return;
     }
     const cur = document.querySelector('#chp-current')?.value ?? '';
-    // В forgot-mode current password не запрашиваем — личность подтверждается
-    // только кодом. На бэкенд пойдёт reset-password с verification code.
     if (!_forgotMode) {
+      // Known-pwd mode: проверяем старый пароль.
       if (!cur) { setFieldError('err-chp-current', t('errors.required')); return; }
       _oldPassword = cur;
     } else {
+      // Forgot-mode: проверяем ПОЛНЫЙ контакт (нормализованный) на
+      // совпадение с _verifyTarget (raw value доступного контакта).
       _oldPassword = '';
+      const typed = String(document.querySelector('#chp-forgot-contact')?.value ?? '').trim();
+      if (!typed) {
+        setFieldError('err-chp-forgot-contact', t('errors.required'));
+        return;
+      }
+      const norm = _verifyType === 'phone'
+        ? typed.toLowerCase().replace(/[\s\-().]/g, '')
+        : typed.toLowerCase();
+      const expected = _verifyType === 'phone'
+        ? String(_verifyTarget).toLowerCase().replace(/[\s\-().]/g, '')
+        : String(_verifyTarget).toLowerCase();
+      if (norm !== expected) {
+        setFieldError('err-chp-forgot-contact', t('profile.contact_mismatch'));
+        return;
+      }
     }
     const btn = document.querySelector('#btn-chp-next');
     setLoading(btn, true);
@@ -371,13 +389,15 @@ export function wireChangePassword(ctx) {
     button:   '#btn-chp-next',
     required: [{
       kind:  'fn',
-      watch: ['#chp-current', '#chp-new', '#chp-confirm',
+      watch: ['#chp-current', '#chp-forgot-contact', '#chp-new', '#chp-confirm',
               '.chp-code-input', '#chp-contact-choice input[name="chp-contact"]'],
       fn: () => {
         if (_step === 1) {
           if (!_verifyTarget) return false;
-          // В forgot-mode current_password не нужен.
-          if (_forgotMode) return true;
+          if (_forgotMode) {
+            // forgot-mode: вместо current_password нужен ПОЛНЫЙ контакт.
+            return !!document.querySelector('#chp-forgot-contact')?.value.trim();
+          }
           return !!document.querySelector('#chp-current')?.value.trim();
         }
         if (_step === 2) {
@@ -421,15 +441,13 @@ export function wireChangePassword(ctx) {
     else if (_step === 2) setStep(1);
   });
 
-  // ── «Забыли пароль?» / «Помню пароль» — toggle forgot-mode на шаге 1 ──
-  document.querySelector('#chp-forgot-link')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    setForgotMode(true);
-  });
-  document.querySelector('#chp-remember-link')?.addEventListener('click', (e) => {
-    e.preventDefault();
+  // ── Segmented-tab переключение режима (шаг 1) ─────────────────
+  document.querySelector('#chp-mode-known')?.addEventListener('click', () => {
     setForgotMode(false);
     setTimeout(() => document.querySelector('#chp-current')?.focus(), 50);
+  });
+  document.querySelector('#chp-mode-forgot')?.addEventListener('click', () => {
+    setForgotMode(true);
   });
 
   // ── Resend code (step 2). ──────────────────────────────────────

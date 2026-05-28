@@ -22,13 +22,14 @@ import { openModal, closeModal, setLoading, setFieldError, clearFieldErrorById, 
 import { wireFormGuard } from '../../../../form-guard.js';
 
 let _wired = false;
+let _guard = null;   // form-guard handle — нужен чтобы refresh() при открытии
 
 export function wireJoinOrgModal() {
   if (_wired) return;
   _wired = true;
 
   // Form-guard: серая кнопка пока org_id не введён.
-  wireFormGuard({
+  _guard = wireFormGuard({
     button:   '#btn-join-org-confirm',
     required: [{ sel: '#join-org-id', kind: 'number' }],
   });
@@ -65,7 +66,22 @@ export function wireJoinOrgModal() {
       // in-place re-mount solo home с обновлённым badge'ом.
       window.dispatchEvent(new CustomEvent('rems:reload-profile'));
     } catch (err) {
-      showAlertText('err-join-org', 'err-join-org-text', errorMessage(err));
+      // Org-уровневые ошибки (организация не найдена / неактивна /
+      // лимит сотрудников / уже состою в другой) логически относятся к
+      // полю «ID организации» — показываем под полем как form-error.
+      // Прочие ошибки (network, validation, 500) — общий alert внизу.
+      const ORG_FIELD_ERRORS = new Set([
+        'errors.organization.not_found',
+        'errors.organization.inactive',
+        'errors.organization.employee_limit_reached',
+        'errors.membership.already_in_other_org',
+        'errors.membership.already_member',
+      ]);
+      if (err?.error_key && ORG_FIELD_ERRORS.has(err.error_key)) {
+        setFieldError('err-join-org-id', errorMessage(err));
+      } else {
+        showAlertText('err-join-org', 'err-join-org-text', errorMessage(err));
+      }
     } finally {
       setLoading(btn, false);
     }
@@ -81,6 +97,10 @@ export function openJoinOrgModal() {
   if (counter) counter.textContent = '0';
   clearFieldErrorById('err-join-org-id');
   hideAlertById('err-join-org');
+  // Поля только что очищены — пересчитываем guard, иначе кнопка
+  // осталась бы «зелёной» с прошлого заполнения (refresh слушает
+  // только input/change, а программный сброс value их не триггерит).
+  _guard?.refresh();
   openModal('join-org-modal');
   setTimeout(() => input?.focus(), 80);
 }

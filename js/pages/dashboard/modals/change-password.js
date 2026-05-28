@@ -35,6 +35,42 @@ let _code          = '';        // captured from step 2
 let _guard         = null;
 let _codeCtl       = null;     // createCodeInput(...) controller
 let _forgotMode    = false;    // true → skip current_password, use reset-password endpoint
+let _chpLockTimer  = null;
+let _chpLockEndsAt = 0;
+
+function _formatRetrySec(sec) {
+  const s = Math.max(0, Math.ceil(sec));
+  if (s < 60) return `${s} сек`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return r > 0 ? `${m} мин ${r} сек` : `${m} мин`;
+}
+
+// Один раз получаем retry_after, дальше клиентский countdown — без
+// per-second backend calls. Инпуты + «Далее» disable'нуты на время
+// блокировки. При 0 — auto-clear + re-enable.
+function _startChpLockCountdown(retryAfterSec) {
+  if (_chpLockTimer) clearInterval(_chpLockTimer);
+  _chpLockEndsAt = Date.now() + Math.max(0, Number(retryAfterSec) || 0) * 1000;
+  const curInput      = document.querySelector('#chp-current');
+  const forgotInput   = document.querySelector('#chp-forgot-contact');
+  const nextBtn       = document.querySelector('#btn-chp-next');
+  [curInput, forgotInput, nextBtn].forEach(el => el && (el.disabled = true));
+  const tickOnce = () => {
+    const left = (_chpLockEndsAt - Date.now()) / 1000;
+    if (left <= 0) {
+      clearInterval(_chpLockTimer); _chpLockTimer = null;
+      hideAlertById('err-chp');
+      [curInput, forgotInput, nextBtn].forEach(el => el && (el.disabled = false));
+      _guard?.refresh?.();
+      return;
+    }
+    showAlertText('err-chp', 'err-chp-text',
+      t('errors.auth.pin_locked_with_timer', { time: _formatRetrySec(left) }));
+  };
+  tickOnce();
+  _chpLockTimer = setInterval(tickOnce, 1000);
+}
 
 // Switch UI between «I remember the password» (default) и forgot-mode.
 // Управляется segmented-tab'ами #chp-mode-known / #chp-mode-forgot.
@@ -274,7 +310,14 @@ async function chpNext() {
       setTimeout(() => _codeCtl?.focus(), 80);
       toast(t('profile.change_pwd_code_sent') || 'Код отправлен', 'ok');
     } catch (err) {
-      if (err?.error_key === 'errors.auth.invalid_credentials') {
+      const key    = err?.error_key;
+      const params = err?.data?.error_params || {};
+      if (key === 'errors.auth.account_locked') {
+        _startChpLockCountdown(Number(params.retry_after) || 0);
+      } else if (key === 'errors.auth.invalid_credentials' && typeof params.attempts_remaining === 'number') {
+        setFieldError('err-chp-current',
+          t('errors.auth.pin_invalid_with_attempts', { n: params.attempts_remaining }));
+      } else if (key === 'errors.auth.invalid_credentials') {
         setFieldError('err-chp-current', errorMessage(err));
       } else {
         showAlertText('err-chp', 'err-chp-text', errorMessage(err));

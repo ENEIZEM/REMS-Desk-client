@@ -191,6 +191,8 @@ export const profile = {
   /** payload: { full_name?, department?, language_code? } */
   update:   (payload) => request('PATCH', '/profile/me', payload),
   sessions: () => request('GET',   '/profile/sessions'),
+  /** Отозвать чужую (не текущую) сессию. id из profile.sessions(). */
+  revokeSession: (id) => request('DELETE', `/profile/sessions/${encodeURIComponent(id)}`),
 
   /** payload: { old_password, new_password, new_password_confirm, verification_code, verification_target } */
   changePassword: (payload) => request('POST', '/profile/change-password', payload),
@@ -230,6 +232,10 @@ export const membership = {
   }),
   /** Отменить pending-заявку. Юзер возвращается в чистое solo состояние. */
   cancel:  () => request('DELETE', '/users/membership/me'),
+  /** Approved-сотрудник покидает свою орг (не для owner). reason — опционально. */
+  leave:   (reason) => request('POST', '/users/membership/leave', { ...(reason ? { reason } : {}) }),
+  /** Принять / отклонить приглашение от орги (для приглашённого solo). */
+  acceptInvitation: () => request('POST', '/users/membership/accept-invitation', {}),
 };
 
 // ─────────────────────────────────────────────────────────────────
@@ -268,16 +274,23 @@ export const members = {
 
   /** contact: email, phone, or numeric userId string. Role is always
       employee — the invite endpoint no longer accepts a role param. */
-  invite: (contact) => request('POST', '/orgs/members/invite', { contact }),
+  invite: (contact, message) => request('POST', '/orgs/members/invite', {
+    contact,
+    ...(message ? { message } : {}),
+  }),
 
-  /** action: 'approved'|'rejected'|'suspended' — role transitions are
-      not available for the owner/employee model. */
-  manage: (userId, action) =>
-    request('PATCH', '/orgs/members/manage', { userId, action }),
+  /** action: 'approved'|'rejected'|'suspended'. message — опц. текст
+      решения, увидит соискатель в уведомлении. */
+  manage: (userId, action, message) =>
+    request('PATCH', '/orgs/members/manage', {
+      userId, action, ...(message ? { message } : {}),
+    }),
 
   /** Owner-only hard-detach from the org. Marks membership as rejected;
-      historical request/audit references stay intact. */
-  remove: (userId) => request('DELETE', `/orgs/members/${userId}`),
+      historical request/audit references stay intact. reason — опц. текст,
+      попадёт в уведомление исключённому. */
+  remove: (userId, reason) => request('DELETE', `/orgs/members/${userId}`,
+    reason ? { reason } : undefined),
 };
 
 // ─────────────────────────────────────────────────────────────────

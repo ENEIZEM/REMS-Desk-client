@@ -35,12 +35,10 @@ export function orgStatusBadge(isActive) {
 
 export function roleBadgeDescriptor(role) {
   switch (role) {
-    case 'owner':    return { key: 'roles.owner',    chip: 'chip-owner',    badge: 'badge-role-owner',    icon: 'ph-shield-star' };
-    case 'employee': return { key: 'roles.employee', chip: 'chip-employee', badge: 'badge-role-employee', icon: 'ph-user' };
+    case 'owner':     return { key: 'roles.owner',     chip: 'chip-owner',     badge: 'badge-role-owner',     icon: 'ph-shield-star' };
+    case 'employee':  return { key: 'roles.employee',  chip: 'chip-employee',  badge: 'badge-role-employee',  icon: 'ph-user' };
+    case 'sys_admin': return { key: 'roles.sys_admin', chip: 'chip-sys-admin', badge: 'badge-role-sys-admin', icon: 'ph-crown-simple' };
     default:
-      // Fallback for null/undefined/unknown roles — render a generic dash
-      // rather than the literal "roles.undefined" key for users that are
-      // logged in but haven't been approved by their org yet.
       return { key: 'membership.status_unknown', chip: 'chip-default', badge: 'badge-default', icon: 'ph-user' };
   }
 }

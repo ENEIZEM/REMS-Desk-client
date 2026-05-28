@@ -78,7 +78,7 @@ if (!consumePinPass()) {
 // inside the Overview tab via #overview-notifs. Keeping the legacy
 // hash alias `#notifications` is handled below (it redirects to
 // overview so old toast → href links don't 404).
-const TAB_IDS = ['overview', 'requests', 'catalog', 'partners', 'members', 'org', 'profile', 'solo-home', 'equipment'];
+const TAB_IDS = ['overview', 'requests', 'catalog', 'partners', 'members', 'contracts', 'org', 'profile', 'solo-home', 'equipment'];
 let currentTab = 'overview';
 
 function switchTab(name, { updateHash = true } = {}) {
@@ -124,13 +124,33 @@ function applyHashTab() {
   // обрезаем после первого '?' / '/' до базового имени вкладки.
   let tab = (location.hash || '').replace(/^#/, '');
   tab = tab.split(/[?\/]/)[0];
-  // Для solo-юзера переходы на скрытые вкладки (overview/requests/etc)
-  // редиректим на их главную = solo-home.
-  if (document.body.dataset.role === 'solo' && tab !== 'solo-home' && tab !== 'profile') {
+  const role = document.body.dataset.role;
+  // Solo-юзер: на скрытые вкладки (overview/requests/etc) → solo-home.
+  if (role === 'solo' && tab !== 'solo-home' && tab !== 'profile') {
     switchTab('solo-home', { updateHash: false });
     return;
   }
-  if (TAB_IDS.includes(tab)) switchTab(tab, { updateHash: false });
+  // employee/owner: на #solo-home (могли быть на нём как solo и потом
+  // получить approve) → overview.
+  if (role !== 'solo' && tab === 'solo-home') {
+    switchTab('overview', { updateHash: false });
+    return;
+  }
+  // Если хэш указывает на скрытый/недоступный для роли таб — overview.
+  if (tab && TAB_IDS.includes(tab)) {
+    const panel = document.getElementById(`tab-${tab}`);
+    const navItem = document.querySelector(`.nav-item[data-tab="${tab}"]`);
+    const panelHidden = panel && getComputedStyle(panel).display === 'none' && !panel.classList.contains('active');
+    const navHidden = navItem && getComputedStyle(navItem).display === 'none';
+    if (panelHidden || navHidden) {
+      switchTab(role === 'solo' ? 'solo-home' : 'overview', { updateHash: false });
+      return;
+    }
+    switchTab(tab, { updateHash: false });
+    return;
+  }
+  // Нет хэша — дефолтный для роли.
+  if (!tab) switchTab(role === 'solo' ? 'solo-home' : 'overview', { updateHash: false });
 }
 window.addEventListener('hashchange', applyHashTab);
 // "settings" is currently mapped to the same panel as "profile" — keep it
@@ -268,11 +288,17 @@ document.addEventListener('click', (e) => {
 // dedicated notifications tab was removed). Scrolls the overview-notifs
 // card into view so the list is immediately visible.
 q('#btn-notifications')?.addEventListener('click', () => {
-  switchTab('overview');
+  // Role-aware: solo-юзер не имеет вкладки 'overview' — его лента живёт
+  // в 'solo-home' (#solo-notifs-slot). Раньше тут был жёсткий
+  // switchTab('overview'), что для solo вело «в никуда».
+  const isSolo   = document.body.dataset.role === 'solo';
+  const tabName  = isSolo ? 'solo-home' : 'overview';
+  const notifSel = isSolo ? '#solo-notifs-slot' : '#overview-notifs';
+  switchTab(tabName);
   // Defer one frame so switchTab's DOM updates are applied before we
   // scroll — otherwise the panel is still display:none.
   requestAnimationFrame(() => {
-    document.querySelector('#overview-notifs')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    document.querySelector(notifSel)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
 });
 
@@ -298,7 +324,13 @@ let _availableContacts = [];
 let _userPermissions = {};
 let _orgData         = null;
 
+let _loadProfileInflight = false;
 async function loadProfile() {
+  // Деблокируем параллельные вызовы — если два notification'а пришли
+  // подряд, обе попытки сделают role-router и могут гонять. Просто
+  // игнорируем второй вызов пока первый не завершился.
+  if (_loadProfileInflight) return;
+  _loadProfileInflight = true;
   // Full-page loader: appears only if /api/profile/me takes > 1.5 s,
   // and once shown stays for at least 1.5 s so it never strobes.
   const stopLoader = attachLoader({ container: document.body });
@@ -323,7 +355,14 @@ async function loadProfile() {
     // location.reload() намеренно НЕ используем — он триггерит PIN-gate
     // (referrer пустой/dashboard). In-place re-mount чище.
     try {
-      const profileResponse = { user, organization: org, membership: resp.data?.membership };
+      // pending_org нужен solo home для текста кнопки «Отменить запрос в [orgName] (ID X)».
+      // Без него orgLabel остаётся пустой и кнопка показывается без идентификатора.
+      const profileResponse = {
+        user,
+        organization: org,
+        membership: resp.data?.membership,
+        pending_org: resp.data?.pending_org ?? null,
+      };
       const { detectRole, applyRoleAttributes, loadDashboardForRole } =
         await import('./role-router.js');
       const detectedRole   = detectRole(profileResponse);
@@ -345,8 +384,24 @@ async function loadProfile() {
           document.querySelectorAll('.tab-panel').forEach(el => {
             el.style.display = '';
             el.classList.remove('hidden');
+            // .tab-fill — модификатор viewport-fill для tab'ов с
+            // list-блоками. При смене роли сбрасываем; следующий
+            // boot re-applyит где нужно.
+            el.classList.remove('tab-fill');
           });
           document.querySelectorAll('.nav-item').forEach(el => {
+            el.style.display = '';
+            el.classList.remove('hidden');
+          });
+          // КРИТИЧНО: сбросить inline display + 'hidden' класс на
+          // ВСЕХ data-role-only-слотах. Иначе при смене solo→employee
+          // слот #employee-overview-slot (его solo-boot скрыл через
+          // hide('[data-role-only="employee"]')) остаётся inline
+          // display:none — даже после переключения роли. Слот
+          // ЗАПОЛНЕН (mount запустился), но НЕ виден. После сброса
+          // CSS-правила [data-role-only] по body[data-role] всё ставят
+          // на свои места автоматически.
+          document.querySelectorAll('[data-role-only]').forEach(el => {
             el.style.display = '';
             el.classList.remove('hidden');
           });
@@ -365,9 +420,42 @@ async function loadProfile() {
         }
         applyRoleAttributes(detectedRole, user.membership_status);
         const boot = await loadDashboardForRole(detectedRole);
-        boot?.(profileResponse);
+        // boot() в собственном try/catch — если в mount-функции какой-то
+        // роли произошла ошибка, без try/catch её ловит ВНЕШНИЙ catch и
+        // switchTab НЕ вызывается → пустой дашборд до reload.
+        let mountFailed = false;
+        try { boot?.(profileResponse); }
+        catch (mountErr) {
+          mountFailed = true;
+          console.error('[dashboard mount] failed:', mountErr);
+        }
         if (!wasBooted || roleChanged) {
           switchTab(detectedRole === 'solo' ? 'solo-home' : 'overview');
+          // 3-tier safety net против пустого дашборда после смены роли:
+          //   1. queueMicrotask — повтор сразу после текущего стека.
+          //   2. requestAnimationFrame — после первого paint.
+          //   3. setTimeout 150ms — последний шанс (на случай если
+          //      DOM-перестройки ещё в полёте).
+          // Каждый tier проверяет slot.innerHTML; если уже заполнен —
+          // выходит без повторного mount'а.
+          const slotId = detectedRole === 'solo'
+            ? '#solo-home-slot'
+            : detectedRole === 'employee'
+              ? '#employee-overview-slot'
+              : '#owner-overview-slot';
+          const tryRemount = (tier) => {
+            const slot = document.querySelector(slotId);
+            if (!slot) return;
+            if (slot.innerHTML.trim()) return;
+            console.warn(`[dashboard ${tier}] slot empty — remounting`);
+            try { boot?.(profileResponse); }
+            catch (e) { console.error(`[dashboard ${tier} remount] failed:`, e); }
+          };
+          queueMicrotask(() => tryRemount('microtask'));
+          requestAnimationFrame(() => tryRemount('raf'));
+          setTimeout(() => tryRemount('timeout'), 150);
+        } else if (roleChanged === false) {
+          applyHashTab();
         }
       }
     } catch (e) {
@@ -424,7 +512,10 @@ async function loadProfile() {
     // hid the org link from any non-owner.
     const canManage = role === 'owner';
     q('#org-nav-section').style.display    = hasOrg                ? '' : 'none';
-    q('#nav-item-members').style.display   = (hasOrg && canManage) ? '' : 'none';
+    // Members tab — для ВСЕХ approved-членов: owner видит «Сотрудники»
+    // (с invite/remove кнопками), employee — «Коллеги» (read-only, без
+    // статистики/удаления, объединено с техникой в employee/team.js).
+    q('#nav-item-members').style.display   = hasOrg                ? '' : 'none';
     q('#no-org-notice')?.classList.toggle('hidden', hasOrg);
 
     // ── Populate the «Ваша организация» tab ────────────────────
@@ -441,6 +532,7 @@ async function loadProfile() {
     toast(errorMessage(err), 'error');
   } finally {
     stopLoader();
+    _loadProfileInflight = false;
     // No hidePageLoader() here — the overlay was already dismissed at
     // module-init time (right after imports). Per the new spec, the
     // moment dashboard JS started running counts as "page rendered".
@@ -626,10 +718,12 @@ function memberRowHTML(m, opts = {}) {
   const dateStr = t(dateKey, { date: formatJoinDate(m.joined_at) });
   const dept    = m.department || t('members.no_department');
 
-  // "Это вы" chip — only on the directory list (not the pending queue,
-  // since the queue contains other people).
-  const selfBadge = (isSelf && !isPending)
-    ? `<span class="members-row-self">${t('members.you')}</span>`
+  // "Это вы" chip — теперь в ПРАВОМ столбце (тот же слот что и
+  // remove-trash у owner'а), чтобы все per-row controls были
+  // выровнены вертикально. Из имени убран.
+  const selfBadge = '';
+  const selfChipRight = (isSelf && !isPending)
+    ? `<span class="members-row-self" title="${t('members.you')}">${t('members.you')}</span>`
     : '';
 
   // Stats pills — only meaningful on approved rows; pending users
@@ -665,7 +759,8 @@ function memberRowHTML(m, opts = {}) {
   } else {
     rightHTML = `
       <div class="members-row-actions">
-        <span class="badge ${isOwner ? 'badge-warning' : 'badge-default'}">${t(isOwner ? 'roles.owner' : 'roles.employee')}</span>
+        <span class="badge ${isOwner ? 'badge-role-owner' : 'badge-role-employee'}">${t(isOwner ? 'roles.owner' : 'roles.employee')}</span>
+        ${selfChipRight ? selfChipRight : ''}
         ${canRemove ? `
           <button class="members-row-delete btn-remove" data-id="${m.id}" data-name="${escapeHTML(m.full_name)}"
                   title="${t('members.remove')}" aria-label="${t('members.remove')}">
@@ -673,6 +768,15 @@ function memberRowHTML(m, opts = {}) {
           </button>` : ''}
       </div>`;
   }
+
+  // Текст инвайта/заявки. Показываем ТОЛЬКО на pending (approved
+  // юзеры уже не нуждаются в этой context-line).
+  const inviteMsg = isPending && m.invite_message
+    ? `<div class="members-row-invite-msg" title="${escapeHTML(m.invite_message)}">
+         <i class="ph ph-chat-circle-text"></i>
+         <span>${escapeHTML(m.invite_message)}</span>
+       </div>`
+    : '';
 
   return `
     <div class="members-row" data-id="${m.id}">
@@ -688,6 +792,7 @@ function memberRowHTML(m, opts = {}) {
           <span class="members-row-sep">·</span>
           <span>${escapeHTML(dateStr)}</span>
         </div>
+        ${inviteMsg}
       </div>
       ${stats}
       ${rightHTML}
@@ -755,6 +860,8 @@ function removeMember(userId, name) {
   _pendingRemoveMemberId = userId;
   const nameEl = q('#remove-member-name');
   if (nameEl) nameEl.textContent = name || '—';
+  const reasonEl = q('#remove-member-reason');
+  if (reasonEl) reasonEl.value = '';   // сброс при каждом открытии
   openModal('remove-member-modal');
 }
 
@@ -762,19 +869,83 @@ q('#btn-remove-member-confirm')?.addEventListener('click', async () => {
   const id = _pendingRemoveMemberId;
   if (!id) return;
   const btn = q('#btn-remove-member-confirm');
+  const reason = (q('#remove-member-reason')?.value || '').trim().slice(0, 500);
   setLoading(btn, true);
   try {
-    await members.remove(id);
+    await members.remove(id, reason);
     closeModal('remove-member-modal');
     toast(t('members.removed_toast'), 'ok');
     _pendingRemoveMemberId = null;
     loadMembers();
+    // owner/team.js рендерит свой собственный список — сигналим ему
+    // перерисоваться (loadMembers пишет в legacy #approved-list,
+    // которого в owner-team-разметке нет).
+    window.dispatchEvent(new CustomEvent('rems:reload-members'));
   } catch (err) {
     toast(errorMessage(err), 'error');
   } finally {
     setLoading(btn, false);
   }
 });
+
+// Owner Ресурсы (owner/team.js) просит открыть модалку исключения —
+// переиспользуем общий removeMember() flow с модалкой #remove-member-modal.
+window.addEventListener('rems:remove-member', (e) => {
+  const { id, name } = e.detail || {};
+  removeMember(id, name);
+});
+
+/* ── Member decision modal (approve / reject join-request) ──────────
+   owner/team.js диспатчит 'rems:member-decision' с {id, name, message}
+   когда owner кликает «Рассмотреть» на pending-плашке. Открываем
+   #member-decision-modal, показываем сообщение соискателя, даём
+   написать опц. текст решения. Accept/Reject → members.manage(). */
+let _pendingDecisionId = null;
+
+window.addEventListener('rems:member-decision', (e) => {
+  const { id, name, message } = e.detail || {};
+  if (!id) return;
+  _pendingDecisionId = id;
+  const nameEl = q('#member-decision-name');
+  if (nameEl) nameEl.textContent = name || '—';
+  // Сообщение соискателя — показываем блок только если оно есть.
+  const msgWrap = q('#member-decision-applicant-msg');
+  const msgText = q('#member-decision-applicant-msg-text');
+  const trimmed = (message || '').trim();
+  if (msgWrap) msgWrap.style.display = trimmed ? '' : 'none';
+  if (msgText) msgText.textContent = trimmed;
+  // Сброс текста решения при каждом открытии.
+  const txt = q('#member-decision-text');
+  if (txt) txt.value = '';
+  openModal('member-decision-modal');
+});
+
+async function submitMemberDecision(action) {
+  const id = _pendingDecisionId;
+  if (!id) return;
+  const acceptBtn = q('#btn-member-decision-accept');
+  const rejectBtn = q('#btn-member-decision-reject');
+  const message = (q('#member-decision-text')?.value || '').trim().slice(0, 500);
+  setLoading(acceptBtn, true);
+  setLoading(rejectBtn, true);
+  try {
+    await members.manage(id, action, message);
+    closeModal('member-decision-modal');
+    toast(t(action === 'approved' ? 'members.approved_toast' : 'members.rejected_toast'), 'ok');
+    _pendingDecisionId = null;
+    loadMembers();
+    // owner/team.js рендерит собственный список — просим перерисоваться.
+    window.dispatchEvent(new CustomEvent('rems:reload-members'));
+  } catch (err) {
+    toast(errorMessage(err), 'error');
+  } finally {
+    setLoading(acceptBtn, false);
+    setLoading(rejectBtn, false);
+  }
+}
+
+q('#btn-member-decision-accept')?.addEventListener('click', () => submitMemberDecision('approved'));
+q('#btn-member-decision-reject')?.addEventListener('click', () => submitMemberDecision('rejected'));
 
 async function manageMember(userId, action) {
   try {
@@ -787,16 +958,35 @@ async function manageMember(userId, action) {
   } catch (err) { toast(errorMessage(err), 'error'); }
 }
 
-q('#btn-invite')?.addEventListener('click', () => openModal('invite-modal'));
-
 // Form-guard: серая кнопка пока контакт не введён.
-wireFormGuard({
+const _inviteGuard = wireFormGuard({
   button:   '#btn-invite-confirm',
   required: [{ sel: '#invite-contact', kind: 'text' }],
 });
 
+q('#btn-invite')?.addEventListener('click', () => {
+  // Чистим поля от прошлого инвайта и пересчитываем guard, иначе
+  // кнопка осталась бы «зелёной» (refresh слушает только input/change).
+  if (q('#invite-contact')) q('#invite-contact').value = '';
+  if (q('#invite-message')) q('#invite-message').value = '';
+  const cnt = q('#invite-message-count');
+  if (cnt) cnt.textContent = '0';
+  q('#err-invite-contact')?.classList.remove('show');
+  q('#err-invite')?.classList.add('hidden');
+  _inviteGuard?.refresh();
+  openModal('invite-modal');
+});
+
+// Live-счётчик для invite-message (как в join-modal).
+const _inviteMsgEl = q('#invite-message');
+const _inviteMsgCnt = q('#invite-message-count');
+_inviteMsgEl?.addEventListener('input', () => {
+  if (_inviteMsgCnt) _inviteMsgCnt.textContent = String(_inviteMsgEl.value.length);
+});
+
 q('#btn-invite-confirm')?.addEventListener('click', async () => {
   const contact = q('#invite-contact')?.value.trim();
+  const message = (q('#invite-message')?.value || '').trim();
 
   q('#err-invite-contact')?.classList.remove('show');
   q('#err-invite')?.classList.add('hidden');
@@ -808,10 +998,12 @@ q('#btn-invite-confirm')?.addEventListener('click', async () => {
   try {
     // Все приглашения вступают как employee — outerside the invite flow,
     // и инвайтить «нового владельца» нельзя. Бэкенд игнорирует second arg.
-    await members.invite(contact);
+    await members.invite(contact, message || undefined);
     closeModal('invite-modal');
     toast(t('toasts.invitation_sent'), 'ok');
     if (q('#invite-contact')) q('#invite-contact').value = '';
+    if (_inviteMsgEl) _inviteMsgEl.value = '';
+    if (_inviteMsgCnt) _inviteMsgCnt.textContent = '0';
   } catch (err) {
     const errEl = q('#err-invite');
     if (errEl)  { errEl.classList.remove('hidden'); errEl.classList.add('show'); }
@@ -870,14 +1062,51 @@ async function initSocketConn() {
       addNotification(payload);
       const text = resolveNotifBody(payload) || resolveNotifTitle(payload) || t('notifications.title');
       toast(text, 'info');
+      const subAction = payload?.data?.action;
+      const rawMsg    = String(payload?.message_text ?? payload?.messageText ?? '');
+      const isInvitedByOrg = payload?.type === 'join_request' &&
+        (subAction === 'invited_by_org' || rawMsg.includes('invited_by_org'));
+      const isInviteeAccepted = payload?.type === 'join_accepted' &&
+        (subAction === 'invitee_accepted' || rawMsg.includes('invitee_accepted'));
+
       if (MEMBERSHIP_REFRESH_TYPES.has(payload?.type)) {
         loadProfile();
       }
-      // Owner получает join_request как user:notification (recipientId=ownerId),
-      // НЕ как org-wide. Поэтому Members tab refresh тоже здесь —
-      // иначе pending applicant появляется только после reopen tab.
-      if (payload?.type === 'join_request' && currentTab === 'members') {
+      // СОЛО получает приглашение от owner'а (join_request + invited_by_org):
+      // его membership_status стал pending+from_org — нужно
+      // перезагрузить профиль, чтобы solo home отрисовал invitation card
+      // с текстом owner'а. Без этого солошник не видит приглашение до
+      // ручного reload (что и было багом).
+      if (isInvitedByOrg) {
+        loadProfile();
+      }
+      // OWNER получает уведомление о НОВОЙ pending-заявке
+      // (join_request без 'invited_by_org' action) или о принятии
+      // приглашения (invitee_accepted). В обоих случаях members-state
+      // изменился — refreshim ВСЕГДА, не только когда currentTab=members.
+      // Если owner на overview — счётчик/чип pending обновится; если на
+      // members — список освежится. Без этого fix owner видел изменения
+      // только после перезагрузки.
+      const ownerNeedsMembersRefresh =
+        (payload?.type === 'join_request' && !isInvitedByOrg) ||
+        isInviteeAccepted;
+      if (ownerNeedsMembersRefresh) {
         loadMembers().catch(() => {});
+        // owner/team.js рендерит СВОЙ список (Коллеги в Ресурсах) — он
+        // слушает только 'rems:reload-members'. Без диспатча новая
+        // pending-заявка появлялась бы лишь после ручного reload.
+        window.dispatchEvent(new CustomEvent('rems:reload-members'));
+        loadProfile();   // employee-count в шапке орги тоже обновим
+      }
+      // Если сотрудник покинул орг (или withdraw pending) — owner
+      // должен увидеть это сразу на любой вкладке.
+      if (
+        payload?.type === 'join_rejected' &&
+        (subAction === 'left_org' || subAction === 'withdrawn_by_applicant')
+      ) {
+        loadMembers().catch(() => {});
+        window.dispatchEvent(new CustomEvent('rems:reload-members'));
+        loadProfile();
       }
     });
 
@@ -895,8 +1124,10 @@ async function initSocketConn() {
     ]);
     socketOn('org:notification', (payload) => {
       addNotification(payload);
-      if (currentTab === 'members' && MEMBERS_REFRESH_TYPES.has(payload?.type)) {
+      if (MEMBERS_REFRESH_TYPES.has(payload?.type)) {
         loadMembers().catch(() => {});
+        // owner/team.js (Коллеги в Ресурсах) перерисуется по событию.
+        window.dispatchEvent(new CustomEvent('rems:reload-members'));
       }
     });
   } catch (_) {}
@@ -946,6 +1177,12 @@ initSocketConn().catch(() => {});
 // новую роль с активной и re-mount'ит соответствующий дашборд.
 window.addEventListener('rems:reload-profile', () => {
   loadProfile().catch(err => console.warn('[reload-profile]', err));
+});
+// Точечный refresh members-list (без полного loadProfile) — для
+// случаев когда owner сам совершил accept/reject из toast'а и его
+// дашборд не получит socket-events от себя самого.
+window.addEventListener('rems:reload-members', () => {
+  loadMembers().catch(err => console.warn('[reload-members]', err));
 });
 
 // ─────────────────────────────────────────────────────────────────

@@ -7,6 +7,10 @@ export function mountEmployeeCatalog() {
   if (!slot) return;
 
   slot.innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title" data-i18n="nav.catalog">Каталог</h1>
+      <p class="page-desc" data-i18n="employee.catalog_desc">Реестр оборудования организации. Можно создать заявку прямо из карточки.</p>
+    </div>
     <div class="placeholder-panel">
       <div class="placeholder-panel-icon">
         <i class="ph-duotone ph-desktop-tower"></i>

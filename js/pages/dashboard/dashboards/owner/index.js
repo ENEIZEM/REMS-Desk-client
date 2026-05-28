@@ -19,27 +19,86 @@ import { mountOwnerOverview }  from './overview.js';
 import { mountOwnerRequests }  from './requests.js';
 import { mountOwnerCatalog }   from './catalog.js';
 import { mountOwnerPartners }  from './partners.js';
-import { setNotificationsTarget } from '../../notifications.js';
+import { mountOwnerTeam }      from './team.js';
+import { mountOwnerContracts } from './contracts.js';
+import { t, onLangChange }     from '../../../../i18n.js';
+
+function safeRun(name, fn) {
+  try { fn(); }
+  catch (e) { console.error(`[owner mount: ${name}] failed:`, e); }
+}
 
 export function bootOwnerDashboard(profile) {
-  // Notifications-фид всегда в #overview-notifs для owner/employee.
-  // (Solo переопределяет на свой slot — при re-route назад вернёмся
-  // к дефолту.)
-  setNotificationsTarget('#overview-notifs');
-  // ── Skoping видимости sidebar и tabs ──────────────────────────
-  // role-attribute на body уже стоит, поэтому CSS-гейты сработают.
-  // Дополнительно показываем owner-specific блоки которые могли
-  // быть скрыты по умолчанию (например org-nav-section).
   show('#org-nav-section', 'block');
   show('#nav-item-org');
+  show('#nav-item-contracts');
+  hide('#profile-solo-section');
   hide('[data-role-only="employee"]');
   hide('[data-role-only="solo"]');
 
-  // ── Mount tab-content модулей ────────────────────────────────
-  mountOwnerOverview(profile);
-  mountOwnerRequests();
-  mountOwnerCatalog();
-  mountOwnerPartners();
-  // Team (Members), Organization, Profile вкладки уже инициализированы
-  // существующим index.js — здесь повторно ничего не делаем.
+  // Owner tabs (финальный набор): Обзор, Ресурсы, Партнёры
+  // (=#tab-contracts, переименован), Ваша организация, Профиль.
+  // Скрываем: Каталог (встроен в Ресурсы), отдельный Заявки tab
+  // (заявки теперь в Обзоре), старую вкладку Партнёры (#tab-partners —
+  // её роль перешла к Контрактам, переименованным в «Партнёры»).
+  hide('.nav-item[data-tab="catalog"]');
+  hide('#tab-catalog');
+  hide('.nav-item[data-tab="requests"]');
+  hide('#tab-requests');
+  hide('.nav-item[data-tab="partners"]');
+  hide('#tab-partners');
+
+  // «Контракты» nav-item + page-title → «Партнёры». Вызывается ПОСЛЕ
+  // mountOwnerContracts (он перезаписывает #tab-contracts innerHTML).
+  const relabelContracts = () => {
+    const lbl = t('nav.partners');
+    const navC = document.querySelector('#nav-item-contracts span');
+    if (navC) { navC.setAttribute('data-i18n', 'nav.partners'); navC.textContent = lbl; }
+    const titleC = document.querySelector('#tab-contracts .page-title');
+    if (titleC) { titleC.setAttribute('data-i18n', 'nav.partners'); titleC.textContent = lbl; }
+  };
+
+  // Legacy overview block — больше не нужен (наш mountOwnerOverview
+  // владеет содержимым). role-router сбрасывает inline display='' на
+  // элементах с [data-role-only], поэтому inline-hide в HTML не
+  // работает — нужен explicit hide() здесь.
+  hide('.legacy-overview-block');
+
+  // Sidebar: «Сотрудники» → «Ресурсы» (та же логика что у employee,
+  // owner тоже видит коллег + технику единым tab'ом). Меняем И
+  // data-i18n attribute, И textContent — DOM-walker не перетрёт.
+  const relabelMembersForOwner = () => {
+    const lbl = t('nav.colleagues');
+    const navMembersEl = document.querySelector('#nav-item-members span');
+    if (navMembersEl) {
+      navMembersEl.setAttribute('data-i18n', 'nav.colleagues');
+      navMembersEl.textContent = lbl;
+    }
+    const tabMembersTitle = document.querySelector('#tab-members .page-title');
+    if (tabMembersTitle) {
+      tabMembersTitle.setAttribute('data-i18n', 'nav.colleagues');
+      tabMembersTitle.textContent = lbl;
+    }
+  };
+  relabelMembersForOwner();
+
+  // Owner mounts. Каждый — в своём try/catch. Requests/Partners tabs
+  // скрыты — их mount не нужен. Overview подключает notifications сам.
+  safeRun('overview',  () => mountOwnerOverview(profile));
+  safeRun('catalog',   () => mountOwnerCatalog());
+  safeRun('team',      () => mountOwnerTeam(profile));
+  safeRun('contracts', () => mountOwnerContracts(profile));
+
+  // Relabel ПОСЛЕ mounts (mountOwnerContracts перезаписывает title).
+  relabelContracts();
+
+  if (!window.__remsOwnerColleaguesRelabelWired) {
+    window.__remsOwnerColleaguesRelabelWired = true;
+    onLangChange(() => {
+      if (document.body.dataset.role === 'owner') {
+        relabelMembersForOwner();
+        relabelContracts();
+      }
+    });
+  }
 }

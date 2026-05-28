@@ -9,7 +9,7 @@
    ═══════════════════════════════════════════════════════════════ */
 
 import { profile }                from '../../api.js';
-import { errorMessage }           from '../../auth.js';
+import { errorMessage, toast }    from '../../auth.js';
 import { t, getLang }             from '../../i18n.js';
 import { attachLoader }           from '../../lib/lazy-loader.js';
 
@@ -87,50 +87,15 @@ export async function loadSessions() {
       return;
     }
 
-    listEl.innerHTML = sessions.map(s => {
-      const left  = formatRemaining(s.token_expires_at);
-      const color = tokenColorByDaysLeft(left.days + left.hours / 24);
-      const pct   = Math.max(2, Math.min(100, ((left.days * 24 + left.hours) / (30 * 24)) * 100));
-      // Single header line: OS in primary text, browser appended in muted
-      // gray after a separator. Device hash falls back when both are unknown.
-      // For the CURRENT session we promote the whole "icon + OS + browser"
-      // block to success colour and attach a card-style tooltip — no extra
-      // standalone icon. The OS icon's own treatment is preserved (same
-      // glyph + size), only its colour inherits.
-      const osLabel      = s.os      && s.os      !== 'Unknown' ? s.os      : '';
-      const browserLabel = s.browser && s.browser !== 'Unknown' ? s.browser : '';
-      const primary = osLabel || browserLabel || s.device_hash;
-      const browserSpan = osLabel && browserLabel
-        ? (s.is_current
-            ? `<span style="font-weight:500; opacity:.85;"> · ${browserLabel}</span>`
-            : `<span style="color:var(--clr-text-muted); font-weight:500;"> · ${browserLabel}</span>`)
-        : '';
-      const blockColor = s.is_current ? 'var(--clr-success)' : 'var(--clr-text-primary)';
-      const iconColor  = s.is_current ? 'var(--clr-success)' : 'var(--clr-accent)';
-      const tooltipAttrs = s.is_current
-        ? `class="profile-card-tooltip session-current-block" tabindex="0" data-tooltip-text="${t('profile.session_current')}"`
-        : '';
-      return `
-        <div class="profile-row" style="flex-direction:column; align-items:stretch; gap:.5rem;">
-          <div style="display:flex; justify-content:space-between; align-items:center; gap:.75rem;">
-            <span ${tooltipAttrs} style="display:flex; align-items:center; gap:.6rem; min-width:0; color:${blockColor};">
-              <i class="ph-duotone ${osIcon(s.os)}" style="color:${iconColor}; font-size:1.25rem;"></i>
-              <span style="min-width:0; font-size:var(--text-sm); font-weight:600;">
-                ${primary}${browserSpan}
-              </span>
-            </span>
-            <span style="font-size:var(--text-sm); font-weight:600; color:${color}; white-space:nowrap;">${left.label}</span>
-          </div>
-          <div style="height:6px; background:var(--clr-bg-muted); border-radius:3px; overflow:hidden;">
-            <div style="height:100%; width:${pct}%; background:${color}; transition:width .3s;"></div>
-          </div>
-          <div style="display:flex; gap:1rem; font-size:var(--text-xs); color:var(--clr-text-muted);">
-            <span>${t('profile.session_last_used')}: ${new Date(s.last_used_at).toLocaleString(getLang() === 'en' ? 'en-GB' : 'ru-RU', { dateStyle: 'short', timeStyle: 'short' })}</span>
-            <span>${t('profile.session_created')}: ${new Date(s.created_at).toLocaleString(getLang() === 'en' ? 'en-GB' : 'ru-RU', { dateStyle: 'short', timeStyle: 'short' })}</span>
-          </div>
-        </div>
-      `;
-    }).join('');
+    listEl.innerHTML = sessions.map(s => sessionRowHTML(s)).join('');
+    // Bind revoke handlers after render so the DOM exists.
+    listEl.querySelectorAll('[data-action="revoke-session"]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = btn.getAttribute('data-session-id');
+        if (id) revokeSession(id);
+      });
+    });
   } catch (err) {
     listEl.innerHTML = `<div class="empty-state" style="padding:1.5rem 0;">
       <i class="ph ph-warning-circle"></i>
@@ -138,5 +103,98 @@ export async function loadSessions() {
     </div>`;
   } finally {
     stopLoader();
+  }
+}
+
+/**
+ * Render one session row. Non-current rows get a small "sign-out" icon
+ * button that calls the revoke endpoint after a confirm() — the wording
+ * makes it clear the OTHER device's session is being terminated, not
+ * this one.
+ */
+function sessionRowHTML(s) {
+  const left  = formatRemaining(s.token_expires_at);
+  const color = tokenColorByDaysLeft(left.days + left.hours / 24);
+  const pct   = Math.max(2, Math.min(100, ((left.days * 24 + left.hours) / (30 * 24)) * 100));
+  // Single header line: OS in primary text, browser appended in muted
+  // gray after a separator. Device hash falls back when both are unknown.
+  // For the CURRENT session we promote the whole "icon + OS + browser"
+  // block to success colour and attach a card-style tooltip — no extra
+  // standalone icon. The OS icon's own treatment is preserved (same
+  // glyph + size), only its colour inherits.
+  const osLabel      = s.os      && s.os      !== 'Unknown' ? s.os      : '';
+  const browserLabel = s.browser && s.browser !== 'Unknown' ? s.browser : '';
+  const primary = osLabel || browserLabel || s.device_hash;
+  const browserSpan = osLabel && browserLabel
+    ? (s.is_current
+        ? `<span style="font-weight:500; opacity:.85;"> · ${browserLabel}</span>`
+        : `<span style="color:var(--clr-text-muted); font-weight:500;"> · ${browserLabel}</span>`)
+    : '';
+  const blockColor = s.is_current ? 'var(--clr-success)' : 'var(--clr-text-primary)';
+  const iconColor  = s.is_current ? 'var(--clr-success)' : 'var(--clr-accent)';
+  const tooltipAttrs = s.is_current
+    ? `class="profile-card-tooltip session-current-block" tabindex="0" data-tooltip-text="${t('profile.session_current')}"`
+    : '';
+
+  // Кнопка отзыва — только на не-текущих сессиях. Текущую юзер закрывает
+  // через обычный logout (чистит токен в localStorage). Иконка sign-out
+  // + tooltip с текстом, чтобы понять что произойдёт.
+  const revokeBtn = s.is_current ? '' : `
+    <button class="session-revoke-btn"
+            data-action="revoke-session"
+            data-session-id="${s.id}"
+            title="${t('profile.session_revoke')}"
+            aria-label="${t('profile.session_revoke')}">
+      <i class="ph-bold ph-sign-out"></i>
+    </button>`;
+
+  return `
+    <div class="profile-row" data-session-id="${s.id}" style="flex-direction:column; align-items:stretch; gap:.5rem;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:.75rem;">
+        <span ${tooltipAttrs} style="display:flex; align-items:center; gap:.6rem; min-width:0; color:${blockColor};">
+          <i class="ph-duotone ${osIcon(s.os)}" style="color:${iconColor}; font-size:1.25rem;"></i>
+          <span style="min-width:0; font-size:var(--text-sm); font-weight:600;">
+            ${primary}${browserSpan}
+          </span>
+        </span>
+        <span style="display:flex; align-items:center; gap:.5rem;">
+          <span style="font-size:var(--text-sm); font-weight:600; color:${color}; white-space:nowrap;">${left.label}</span>
+          ${revokeBtn}
+        </span>
+      </div>
+      <div style="height:6px; background:var(--clr-bg-muted); border-radius:3px; overflow:hidden;">
+        <div style="height:100%; width:${pct}%; background:${color}; transition:width .3s;"></div>
+      </div>
+      <div style="display:flex; gap:1rem; font-size:var(--text-xs); color:var(--clr-text-muted);">
+        <span>${t('profile.session_last_used')}: ${new Date(s.last_used_at).toLocaleString(getLang() === 'en' ? 'en-GB' : 'ru-RU', { dateStyle: 'short', timeStyle: 'short' })}</span>
+        <span>${t('profile.session_created')}: ${new Date(s.created_at).toLocaleString(getLang() === 'en' ? 'en-GB' : 'ru-RU', { dateStyle: 'short', timeStyle: 'short' })}</span>
+      </div>
+    </div>
+  `;
+}
+
+async function revokeSession(id) {
+  // Confirm — простой нативный confirm. На уровне UX согласован с другими
+  // destructive-операциями в проекте (например, кнопка удалить участника).
+  if (!window.confirm(t('profile.session_revoke_confirm'))) return;
+  // Optimistic: убираем строку сразу, ставим pending state. Если 4xx/5xx —
+  // перерендериваем весь список с актуальными данными.
+  const row = document.querySelector(`.profile-row[data-session-id="${id}"]`);
+  if (row) {
+    row.style.opacity = '0.4';
+    row.style.pointerEvents = 'none';
+  }
+  try {
+    await profile.revokeSession(id);
+    // Полный rerender, чтобы счётчик в шапке (#sessions-count) тоже
+    // обновился, и удалённая сессия точно исчезла из DOM.
+    await loadSessions();
+    toast(t('profile.session_revoked_toast'), 'ok');
+  } catch (err) {
+    if (row) {
+      row.style.opacity = '';
+      row.style.pointerEvents = '';
+    }
+    toast(errorMessage(err), 'error');
   }
 }

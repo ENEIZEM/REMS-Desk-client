@@ -32,16 +32,60 @@ export function requirePinUnlock() {
     const errBox  = overlay.querySelector('#pin-lock-error');
     const errText = overlay.querySelector('#pin-lock-error-text');
 
+    // Активный countdown — секундный интервал, обновляющий текст с
+    // оставшимся временем lockout'а. При достижении 0 авто-clearError.
+    let lockTimer = null;
+    let lockEndsAt = 0;
+
+    function formatRemaining(sec) {
+      const s = Math.max(0, Math.ceil(sec));
+      if (s < 60) return `${s} сек`;
+      const m = Math.floor(s / 60);
+      const r = s % 60;
+      return r > 0 ? `${m} мин ${r} сек` : `${m} мин`;
+    }
+
     function showError(msg) {
       if (errBox && errText) {
         errText.textContent = msg;
+        // .alert по дефолту display:none — нужен класс .show чтобы стать
+        // display:flex. Класс .hidden — legacy маркер, безвреден.
+        errBox.classList.add('show');
         errBox.classList.remove('hidden');
       }
       overlay.querySelectorAll('.pin-lock-input').forEach(i => i.classList.add('error'));
     }
     function clearError() {
-      if (errBox) errBox.classList.add('hidden');
+      if (errBox) {
+        errBox.classList.remove('show');
+        errBox.classList.add('hidden');
+      }
       overlay.querySelectorAll('.pin-lock-input').forEach(i => i.classList.remove('error'));
+      if (lockTimer) { clearInterval(lockTimer); lockTimer = null; }
+      lockEndsAt = 0;
+      // Разблокируем инпуты после окончания таймера.
+      overlay.querySelectorAll('.pin-lock-input').forEach(i => { i.disabled = false; });
+    }
+
+    function startLockCountdown(retryAfterSec) {
+      if (lockTimer) clearInterval(lockTimer);
+      lockEndsAt = Date.now() + Math.max(0, Number(retryAfterSec) || 0) * 1000;
+      // Дисейблим инпуты — пока залочены, ввод бесполезен.
+      overlay.querySelectorAll('.pin-lock-input').forEach(i => { i.disabled = true; });
+      const tick = () => {
+        const left = (lockEndsAt - Date.now()) / 1000;
+        if (left <= 0) {
+          clearError();
+          return;
+        }
+        if (errText) {
+          errText.textContent = t('errors.auth.pin_locked_with_timer', {
+            time: formatRemaining(left),
+          });
+        }
+      };
+      tick();
+      lockTimer = setInterval(tick, 1000);
     }
 
     const codeCtl = createCodeInput({
@@ -68,18 +112,24 @@ export function requirePinUnlock() {
       } catch (err) {
         const key    = err?.error_key;
         const params = err?.data?.error_params || {};
-        let msg;
-        if (key === 'errors.auth.pin_locked') {
-          msg = t('errors.auth.pin_locked_with_timer', { retry_after: Number(params.retry_after) || 0 });
+        // Backend может вернуть retry_after на верхнем уровне err.data —
+        // проверим оба места.
+        const retryAfter = Number(params.retry_after ?? err?.data?.retry_after) || 0;
+        if (key === 'errors.auth.pin_locked' || retryAfter > 0) {
+          // Активируем countdown, который сам периодически обновит
+          // текст «Повторите через X сек/мин» и снимет ошибку на 0.
+          showError(t('errors.auth.pin_locked_with_timer', {
+            time: formatRemaining(retryAfter),
+          }));
+          startLockCountdown(retryAfter);
         } else if (key === 'errors.auth.pin_invalid' && typeof params.attempts_remaining === 'number') {
-          msg = t('errors.auth.pin_invalid_with_attempts', { n: params.attempts_remaining });
+          showError(t('errors.auth.pin_invalid_with_attempts', { n: params.attempts_remaining }));
         } else if (key) {
           const translated = t(key);
-          msg = translated !== key ? translated : t('errors.auth.pin_invalid');
+          showError(translated !== key ? translated : t('errors.auth.pin_invalid'));
         } else {
-          msg = t('errors.auth.pin_invalid');
+          showError(t('errors.auth.pin_invalid'));
         }
-        showError(msg);
         codeCtl.clear();
         codeCtl.focus();
       } finally {

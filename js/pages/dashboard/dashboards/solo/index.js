@@ -14,12 +14,17 @@ export function bootSoloDashboard(profile) {
   // относится к работе внутри организации (Заявки, Каталог, Партнёры,
   // Команда, Организация).
   hide('#org-nav-section');
+  // Профиль у solo вынесен в отдельную секцию (org-section, где он
+  // живёт у employee/owner, скрыта целиком).
+  show('#profile-solo-section', 'block');
   hide('[data-role-only="owner"]');
   hide('[data-role-only="employee"]');
   hide('.nav-item[data-tab="requests"]');
   hide('.nav-item[data-tab="equipment"]');
   hide('.nav-item[data-tab="catalog"]');
   hide('.nav-item[data-tab="partners"]');
+  hide('.nav-item[data-tab="contracts"]');
+  hide('#tab-contracts');
 
   // «Обзор» переименовываем в «Главная» — переключаем data-tab,
   // чтобы клик вёл на solo-tab-panel.

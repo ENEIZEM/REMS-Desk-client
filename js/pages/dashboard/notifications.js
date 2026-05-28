@@ -44,6 +44,11 @@ import { t, getLang }                 from '../../i18n.js';
 import { attachLoader }               from '../../lib/lazy-loader.js';
 
 let _notifications = [];
+// Current view filter: 'all' (show everything) or 'unread' (hide rows
+// where read_at is set). Persists across re-renders inside one session
+// but resets on reload — the segmented control is purely a UI affordance,
+// not an account-level preference.
+let _filter = 'all';
 
 // Lazily-built HTMLAudioElement. Browsers gate autoplay on first user
 // gesture; we don't try to "warm up" the audio context manually because
@@ -60,23 +65,79 @@ let _audio = null;
           can read the notification to compute query strings (e.g.
           jumping to a specific session id in the profile view).
 */
+// `tab` — целевая вкладка БЕЗ hash-префикса. resolveSafeHref ниже
+// проверит, существует ли соответствующий tab-panel в DOM (т.е.
+// доступен ли он для текущей роли), и если нет — fall-back на overview
+// или solo-home в зависимости от роли. Это исключает «клик уведомления
+// ведёт на пустоту» когда роль/вкладки сменились (например, юзер был
+// employee, его исключили → он solo → клик на старое уведомление
+// «Принято» вёл на удалённый #org).
 const TYPE_CONFIG = {
-  new_session:            { icon: 'ph-shield-warning',     color: 'amber',  href: () => '/pages/dashboard.html#profile?section=sessions' },
-  join_request:           { icon: 'ph-user-plus',          color: 'blue',   href: () => '/pages/dashboard.html#members' },
-  join_accepted:          { icon: 'ph-check-circle',       color: 'green',  href: () => '/pages/dashboard.html#org' },
-  join_accepted_alt_role: { icon: 'ph-check-circle',       color: 'green',  href: () => '/pages/dashboard.html#org' },
-  join_rejected:          { icon: 'ph-x-circle',           color: 'red',    href: () => '/pages/dashboard.html#org' },
-  status_change:          { icon: 'ph-arrows-clockwise',   color: 'blue',   href: (n) => n.request_id ? `/pages/dashboard.html#requests/${n.request_id}` : '/pages/dashboard.html#requests' },
-  new_assignment:         { icon: 'ph-clipboard-text',     color: 'blue',   href: (n) => n.request_id ? `/pages/dashboard.html#requests/${n.request_id}` : '/pages/dashboard.html#requests' },
-  due_date:               { icon: 'ph-clock-countdown',    color: 'amber',  href: (n) => n.request_id ? `/pages/dashboard.html#requests/${n.request_id}` : '/pages/dashboard.html#requests' },
-  overdue:                { icon: 'ph-warning-octagon',    color: 'red',    href: (n) => n.request_id ? `/pages/dashboard.html#requests/${n.request_id}` : '/pages/dashboard.html#requests' },
+  new_session:            { icon: 'ph-shield-warning',     color: 'amber',  tab: () => 'profile?section=sessions' },
+  join_request:           { icon: 'ph-user-plus',          color: 'blue',   tab: (n) => {
+    const action = n?.data?.action;
+    const raw = String(n?.message_text ?? n?.messageText ?? '');
+    // invited_by_org — это уведомление приглашённому юзеру (он solo).
+    // У него нет #members, ведём на solo-home / overview.
+    if (action === 'invited_by_org' || raw.includes('invited_by_org')) return 'overview';
+    return 'members';
+  } },
+  join_accepted:          { icon: 'ph-check-circle',       color: 'green',  tab: (n) => {
+    const action = n?.data?.action;
+    const raw = String(n?.message_text ?? n?.messageText ?? '');
+    // invitee_accepted — owner получает; ведём в Сотрудников.
+    if (action === 'invitee_accepted' || raw.includes('invitee_accepted')) return 'members';
+    return 'overview';
+  } },
+  join_accepted_alt_role: { icon: 'ph-check-circle',       color: 'green',  tab: () => 'overview' },
+  join_rejected:          { icon: 'ph-x-circle',           color: 'red',    tab: (n) => {
+    const action = n?.data?.action;
+    const raw = String(n?.message_text ?? n?.messageText ?? '');
+    // Для owner-side подтипов (withdrawn / left) — ведём в Сотрудников.
+    if (action === 'withdrawn_by_applicant' || raw.includes('withdrawn_by_applicant')) return 'members';
+    if (action === 'left_org'               || raw.includes('member_left_org'))       return 'members';
+    // Для самого исключённого юзера — overview (он уже solo).
+    return 'overview';
+  } },
+  status_change:          { icon: 'ph-arrows-clockwise',   color: 'blue',   tab: (n) => n.request_id ? `requests/${n.request_id}` : 'requests' },
+  new_assignment:         { icon: 'ph-clipboard-text',     color: 'blue',   tab: (n) => n.request_id ? `requests/${n.request_id}` : 'requests' },
+  due_date:               { icon: 'ph-clock-countdown',    color: 'amber',  tab: (n) => n.request_id ? `requests/${n.request_id}` : 'requests' },
+  overdue:                { icon: 'ph-warning-octagon',    color: 'red',    tab: (n) => n.request_id ? `requests/${n.request_id}` : 'requests' },
 };
 // Fallback now points to #overview — the notifications tab was removed
 // and the full feed lives inside the Overview tab.
-const FALLBACK_CONFIG = { icon: 'ph-info', color: 'slate', href: () => '/pages/dashboard.html#overview' };
+const FALLBACK_CONFIG = { icon: 'ph-info', color: 'slate', tab: () => 'overview' };
 
 function typeConfig(notif) {
   return TYPE_CONFIG[notif?.notification_type] ?? FALLBACK_CONFIG;
+}
+
+/**
+ * Возвращает безопасный hash-tab — если запрошенный таб не существует
+ * для текущей роли (его tab-panel либо отсутствует в DOM, либо скрыт),
+ * fall-back на overview / solo-home в зависимости от роли. Так клик по
+ * уведомлению никогда не ведёт на «пустоту».
+ *
+ * tabSpec — строка вида "members" или "requests/42" или
+ * "profile?section=sessions". Базовый sliced до первого `/`,`?` — это
+ * имя tab-panel, которое мы и проверяем.
+ */
+function resolveSafeTab(tabSpec) {
+  if (!tabSpec) return safeFallbackTab();
+  const baseTab = String(tabSpec).split(/[\/?]/)[0];
+  const panel   = document.querySelector(`#tab-${baseTab}`);
+  const navItem = document.querySelector(`.nav-item[data-tab="${baseTab}"]`);
+  const isAvailable = !!panel
+    && getComputedStyle(panel).display !== 'none' || (navItem && getComputedStyle(navItem).display !== 'none');
+  // Если ничего из tab-panel/nav-item не доступно для роли — fall-back.
+  if (!panel || (navItem && getComputedStyle(navItem).display === 'none')) {
+    return safeFallbackTab();
+  }
+  return tabSpec;
+}
+
+function safeFallbackTab() {
+  return document.body.dataset.role === 'solo' ? 'solo-home' : 'overview';
 }
 
 /* ── Public API ──────────────────────────────────────────────── */
@@ -273,15 +334,18 @@ function showNotifToast(notif) {
     </div>
     ${mode === 'owner_decide' ? actionsHTML : ''}`;
 
-  // Body click: in navigate mode this opens + marks read (same as the
-  // in-list click). In owner_decide mode the body is non-interactive —
-  // the user is expected to use the explicit Accept/Reject buttons.
-  if (mode === 'navigate') {
-    el.querySelector('.notify-toast-body')?.addEventListener('click', () => {
-      onItemClick(notif);
-      removeToast(el);
-    });
-  }
+  // Click anywhere on the toast (NOT on action buttons — у них
+  // stopPropagation в их собственных handler'ах) → раскрывает toast
+  // целиком чтобы показать полный текст / title если они были
+  // обрезаны line-clamp'ом. Также помечает прочитанным.
+  // Навигация на вкладку из toast'а УБРАНА — пользователь специально
+  // просил, чтобы клик НЕ перебрасывал на другую вкладку.
+  // В owner_decide режиме body тоже кликабелен — раскроет, но
+  // accept/reject остаются нетронуты (у них stopPropagation ниже).
+  el.addEventListener('click', () => {
+    el.classList.toggle('is-expanded');
+    if (!notif.read_at) markRead(notif);
+  });
   el.querySelector('[data-action="read"]')?.addEventListener('click', (e) => {
     e.stopPropagation();
     markRead(notif);
@@ -333,6 +397,13 @@ async function decideJoinRequest(notif, action, toastEl) {
     if (!notif.read_at) await markRead(notif);
     toast(t(action === 'approved' ? 'notifications.actions.accepted_toast' : 'notifications.actions.rejected_toast'), 'ok');
     removeToast(toastEl);
+    // Synchronise members list + profile (employee-count в шапке орги)
+    // и любой текущий dashboard. Backend сам шлёт socket-уведомление
+    // юзеру, но toast-action происходит у OWNER'а — его собственный
+    // dashboard не получает push (он сам инициировал change). Эмулируем
+    // тот же refresh-bus.
+    window.dispatchEvent(new CustomEvent('rems:reload-profile'));
+    window.dispatchEvent(new CustomEvent('rems:reload-members'));
   } catch (err) {
     toastEl?.querySelectorAll('button[data-action="accept"], button[data-action="reject"]')
       .forEach(b => { b.disabled = false; });
@@ -369,14 +440,51 @@ export function setNotificationsTarget(selector) {
 }
 
 function renderOverviewNotifs() {
+  // Sync the segmented filter UI (counts + active state) even if the
+  // feed container isn't on screen (it lives in #overview-notifs which
+  // only the owner/employee dashboards render). The filter host's
+  // own visibility is owned by HTML.
+  syncFilterUI();
+
   const el = document.querySelector(_renderTargetSelector);
   if (!el) return;
-  if (!_notifications.length) {
-    el.innerHTML = `<div class="empty-state" style="padding:2rem;"><i class="ph ph-bell-slash"></i><p class="empty-state-text">${t('notifications.empty')}</p></div>`;
+
+  const items = _filter === 'unread'
+    ? _notifications.filter(n => !n.read_at)
+    : _notifications;
+
+  if (!items.length) {
+    // Empty-state text varies by filter — «Нет непрочитанных» если фильтр
+    // активен, иначе общий «Нет уведомлений». Это снимает у юзера
+    // когнитивный диссонанс: «у меня 12 уведомлений, но я вижу пусто».
+    const emptyKey = _filter === 'unread' && _notifications.length
+      ? 'notifications.empty_unread'
+      : 'notifications.empty';
+    el.innerHTML = `<div class="empty-state" style="padding:2rem;"><i class="ph ph-bell-slash"></i><p class="empty-state-text">${t(emptyKey)}</p></div>`;
     return;
   }
-  el.innerHTML = _notifications.map(notifItemHTML).join('');
-  bindItemHandlers(el, _notifications);
+  el.innerHTML = items.map(notifItemHTML).join('');
+  bindItemHandlers(el, items);
+}
+
+function syncFilterUI() {
+  // Поддерживаем сразу несколько фильтр-хостов на странице (например,
+  // owner/employee overview + solo home). Все они синхронизируются с
+  // одним глобальным _filter — клик в любом отражается во всех.
+  const hosts = document.querySelectorAll('[data-notif-filter-host]');
+  if (!hosts.length) return;
+  const unreadCount = _notifications.filter(n => !n.read_at).length;
+  hosts.forEach(host => {
+    host.querySelectorAll('.notif-filter-btn').forEach(btn => {
+      const active = btn.getAttribute('data-filter') === _filter;
+      btn.classList.toggle('is-active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    host.querySelectorAll('[data-unread-count]').forEach(el => {
+      el.textContent = unreadCount > 0 ? String(unreadCount > 99 ? '99+' : unreadCount) : '';
+      el.style.display = unreadCount > 0 ? '' : 'none';
+    });
+  });
 }
 
 /**
@@ -387,9 +495,22 @@ function bindItemHandlers(container, items) {
   container.querySelectorAll('.notification-item').forEach((el, i) => {
     const notif = items[i];
 
-    // Whole-row click — auto-mark-read + navigate. Buttons inside the
-    // row stopPropagation so their own behaviour wins.
-    el.addEventListener('click', () => onItemClick(notif));
+    // Whole-row click — поведение зависит от того, есть ли усечённый
+    // текст. Если body обрезан line-clamp'ом — первый клик раскрывает
+    // карточку (показываем полный текст) + помечает прочитанной. Если
+    // текст уже виден целиком (или строки expanded) — клик ведёт себя
+    // как раньше: mark-read + navigate. Так юзер сначала видит весь
+    // текст, и только следующим действием переходит на связанную вкладку.
+    el.addEventListener('click', () => {
+      const body = el.querySelector('.notification-body');
+      const truncated = body && body.scrollHeight - 1 > body.clientHeight;
+      if (truncated && !el.classList.contains('is-expanded')) {
+        el.classList.add('is-expanded');
+        if (!notif.read_at) markRead(notif);
+        return;
+      }
+      onItemClick(notif);
+    });
 
     // Per-action buttons. Read/unread are mutually exclusive by render,
     // so at most one is in the DOM at any time per row.
@@ -452,12 +573,34 @@ function notifItemHTML(n) {
 export function resolveTitle(n) {
   const type = n?.notification_type ?? n?.type;
   if (!type) return t('notifications.types.unknown');
-  // Subtype overrides: «removed_by_owner» переиспользует enum-член
-  // 'join_rejected' (чтобы не менять CHECK constraint в БД), но семантически
-  // это «вас исключили», а не «заявка отклонена». Различаем по data.action.
+  // Subtype overrides: переиспользуем enum-член 'join_rejected' для
+  // нескольких семантически разных событий (без расширения CHECK
+  // constraint в БД). Различаем по data.action ИЛИ — если data не
+  // дошло (например, после reload персистнутая запись из notifications
+  // не имеет data-колонки) — по messageText, в которую запихан
+  // i18n-ключ конкретного подтипа.
   const action = n?.data?.action;
-  if (type === 'join_rejected' && action === 'removed_by_owner') {
-    return t('notifications.types.removed_by_owner');
+  const rawMsg = String(n?.message_text ?? n?.messageText ?? '');
+  if (type === 'join_rejected') {
+    if (action === 'removed_by_owner'       || rawMsg.includes('removed_by_owner'))
+      return t('notifications.types.removed_by_owner');
+    if (action === 'withdrawn_by_applicant' || rawMsg.includes('withdrawn_by_applicant'))
+      return t('notifications.types.withdrawn_by_applicant');
+    if (action === 'left_org'               || rawMsg.includes('member_left_org'))
+      return t('notifications.types.member_left_org');
+  }
+  if (type === 'join_request' && (action === 'invited_by_org' || rawMsg.includes('invited_by_org'))) {
+    return t('notifications.types.invited_by_org');
+  }
+  // Owner-side join_request — дублируем имя заявителя в title.
+  if (type === 'join_request' && n?.data?.applicantName) {
+    return t('notifications.types.join_request_from', { name: n.data.applicantName });
+  }
+  if (type === 'join_accepted' && (action === 'invitee_accepted' || rawMsg.includes('invitee_accepted'))) {
+    return t('notifications.types.invitee_accepted');
+  }
+  if (type === 'join_accepted' && (action === 'invitee_joined_via_link' || rawMsg.includes('invitee_joined_via_link'))) {
+    return t('notifications.types.invitee_joined_via_link');
   }
   return t(`notifications.types.${type}`);
 }
@@ -513,7 +656,16 @@ function onItemClick(notif) {
   if (!notif.read_at) markRead(notif);
   const cfg = typeConfig(notif);
   try {
-    const href = typeof cfg.href === 'function' ? cfg.href(notif) : cfg.href;
+    // Берём `tab` (новый contract) или `href` (legacy) и кладём в
+    // resolveSafeTab — он подменит несуществующие для текущей роли
+    // вкладки на overview/solo-home.
+    let tabSpec;
+    if (typeof cfg.tab === 'function')      tabSpec = cfg.tab(notif);
+    else if (typeof cfg.tab === 'string')   tabSpec = cfg.tab;
+    else if (typeof cfg.href === 'function') tabSpec = String(cfg.href(notif)).split('#')[1] || '';
+    else if (typeof cfg.href === 'string')   tabSpec = String(cfg.href).split('#')[1] || '';
+    tabSpec = resolveSafeTab(tabSpec);
+    const href = `/pages/dashboard.html#${tabSpec}`;
     if (!href) return;
     // Если URL — это тот же dashboard.html с другим hash'ем — меняем только
     // hash, чтобы НЕ дёрнуть PIN-gate (это in-system навигация, юзер не
@@ -625,9 +777,30 @@ function escapeHTML(str) {
     .replace(/"/g, '&quot;');
 }
 
+/* ── Segmented filter (All / Unread) wire-up ──────────────────── */
+
+// Event-delegated so it works even if the dashboard re-mounts the
+// filter host (e.g. after a role swap that re-renders the chrome).
+document.addEventListener('click', (e) => {
+  const btn = e.target?.closest?.('.notif-filter-btn');
+  if (!btn) return;
+  const host = btn.closest('[data-notif-filter-host]');
+  if (!host) return;
+  const next = btn.getAttribute('data-filter');
+  if (!next || next === _filter) return;
+  _filter = next;
+  refreshAll();
+});
+
 /* ── "Mark all as read" wire-up ───────────────────────────────── */
 
-document.querySelector('#btn-mark-all-read')?.addEventListener('click', async () => {
+// Делегированный обработчик: ловим клики и по #btn-mark-all-read
+// (overview/owner/employee), и по любому элементу с [data-mark-all-read]
+// (solo home, потенциально другие места). Это позволяет иметь несколько
+// «Прочитать все» кнопок на странице без дублирования логики.
+document.addEventListener('click', async (e) => {
+  const btn = e.target?.closest?.('#btn-mark-all-read, [data-mark-all-read]');
+  if (!btn) return;
   const unread = _notifications.filter(n => !n.read_at);
   if (!unread.length) return;
   // Optimistic: clear local state first, then call the single bulk

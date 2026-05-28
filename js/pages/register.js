@@ -362,7 +362,10 @@ function hideAlert(id) {
     required: [
       { sel: '#reg-contact',          kind: 'text' },
       { sel: 'input[name="role"]',    kind: 'radio-group' },
-      // Conditional: owner needs org-name (+ occupation), joining role needs org-id.
+      // Conditional: owner needs org-name. Для employee org-id
+      // ОПЦИОНАЛЕН — guard пропускает дальше даже с пустым полем
+      // (юзер заявит из solo home позже). Если введён — проверяем
+      // что валидное число.
       {
         kind:  'fn',
         watch: ['#org-name', '#org-id', 'input[name="role"]'],
@@ -373,7 +376,9 @@ function hideAlert(id) {
             return !!document.querySelector('#org-name')?.value.trim();
           }
           const v = document.querySelector('#org-id')?.value.trim();
-          return !!v && Number.isFinite(parseInt(v, 10)) && parseInt(v, 10) > 0;
+          if (!v) return true;   // пусто — solo-режим, OK
+          const n = parseInt(v, 10);
+          return Number.isFinite(n) && n > 0;
         },
       },
     ],
@@ -424,14 +429,22 @@ function hideAlert(id) {
         state.organization_id   = null;
       }
     } else if (selectedRole) {
+      // Org ID НЕОБЯЗАТЕЛЕН. Пусто → юзер регистрируется как solo
+      // (без orga); может подать заявку позже из solo home. Если
+      // заполнено — валидируем как число > 0.
       const orgIdRaw = q('#org-id')?.value.trim() ?? '';
-      const orgIdNum = parseInt(orgIdRaw, 10);
-      if (!orgIdRaw || !Number.isFinite(orgIdNum) || orgIdNum < 1) {
-        showFieldError('err-org-id', 'errors.required');
-        valid = false;
-      } else {
+      if (!orgIdRaw) {
         state.organization_name = '';
-        state.organization_id   = orgIdNum;
+        state.organization_id   = null;
+      } else {
+        const orgIdNum = parseInt(orgIdRaw, 10);
+        if (!Number.isFinite(orgIdNum) || orgIdNum < 1) {
+          showFieldError('err-org-id', 'errors.validation.invalid_id');
+          valid = false;
+        } else {
+          state.organization_name = '';
+          state.organization_id   = orgIdNum;
+        }
       }
     }
 

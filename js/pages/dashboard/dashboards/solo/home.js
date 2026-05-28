@@ -27,6 +27,12 @@ import { wireJoinOrgModal, openJoinOrgModal } from './join-modal.js';
 import { setNotificationsTarget, loadNotifications } from '../../notifications.js';
 import { openModal, closeModal, setLoading } from '../../ui-helpers.js';
 
+function escapeHTML(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 export function mountSoloHome(profile) {
   const slot = document.querySelector('#solo-home-slot');
   if (!slot) return;
@@ -41,18 +47,54 @@ export function mountSoloHome(profile) {
   const pendingOrg = profile?.pending_org || null;
   const orgId      = pendingOrg?.id   ?? profile?.organization?.id   ?? null;
   const orgName    = pendingOrg?.name ?? profile?.organization?.name ?? '';
-  // Статус-badge.
-  const statusBadgeHTML = isPending
+  // Направление pending-связи: 'from_user' = солошник подал заявку;
+  // 'from_org' = owner пригласил, юзер должен сам принять. Null/missing
+  // — fallback на legacy 'from_user' (до миграции колонок).
+  const inviteDirection = pendingOrg?.invite_direction || 'from_user';
+  const inviteMessage   = pendingOrg?.invite_message || '';
+  const isInvitation    = isPending && inviteDirection === 'from_org';
+  // Статус-badge: invitation подсвечивается отдельно, чтобы юзер
+  // понимал что это новое приглашение ему, а не просто «ожидание».
+  const statusBadgeHTML = isInvitation
+    ? `<span class="badge badge-info"><i class="ph ph-envelope-open"></i><span data-i18n="solo.status_invited">Вас приглашают</span></span>`
+    : isPending
     ? `<span class="badge badge-warning"><i class="ph ph-hourglass"></i><span data-i18n="solo.status_pending">На рассмотрении</span></span>`
     : `<span class="badge badge-default" data-i18n="solo.status_unaffiliated">Не состою в организации</span>`;
 
-  // Pending — вместо «Вступить» показываем красную «Отменить запрос
-  // в [orgName] #ID» (с confirm-модалкой). Если name отсутствует —
-  // показываем только #ID (всегда есть для pending).
   const orgLabel = orgName
     ? (orgId ? `«${orgName}» (ID ${orgId})` : `«${orgName}»`)
     : (orgId ? `ID ${orgId}` : '');
-  const actionRowHTML = isPending
+
+  // Тело-action: 3 варианта.
+  //   1. Invitation (from_org) — accept/reject + текст owner'а если был.
+  //   2. Self-request (from_user, pending) — кнопка «Отменить запрос».
+  //   3. Solo без pending — кнопка «Запросить членство по ID».
+  const actionRowHTML = isInvitation
+    ? `
+        <div class="solo-invite-card">
+          <div class="solo-invite-head">
+            <i class="ph-duotone ph-envelope-open solo-invite-icon"></i>
+            <span class="solo-invite-title">
+              ${t('solo.invitation_title', { org: orgLabel }) || 'Приглашение от ' + orgLabel}
+            </span>
+          </div>
+          ${inviteMessage ? `
+            <div class="solo-invite-message" data-tooltip-text="${escapeHTML(inviteMessage)}">
+              <span class="solo-invite-message-label" data-i18n="solo.invitation_from_owner">Сообщение руководителя:</span>
+              <span class="solo-invite-message-text">${escapeHTML(inviteMessage)}</span>
+            </div>` : ''}
+          <div class="solo-invite-actions">
+            <button id="solo-btn-invite-accept" class="btn btn-primary">
+              <i class="ph ph-check"></i>
+              <span data-i18n="solo.invitation_accept">Принять</span>
+            </button>
+            <button id="solo-btn-invite-reject" class="btn btn-secondary">
+              <i class="ph ph-x"></i>
+              <span data-i18n="solo.invitation_reject">Отклонить</span>
+            </button>
+          </div>
+        </div>`
+    : isPending
     ? `
         <div class="solo-pending-hint">
           <i class="ph-duotone ph-hourglass-medium"></i>
@@ -73,11 +115,10 @@ export function mountSoloHome(profile) {
   const stats = profile?.user?.stats || {};
   const createdN  = Number(stats.requests_created  ?? 0);
   const handledN  = Number(stats.requests_handled  ?? 0);
-  // Рейтинг показываем ТОЛЬКО если юзер реально что-то выполнил —
-  // иначе строка с «—» бессмысленна. handled === 0 → скрываем строку
-  // (правая колонка естественной высоты, без растяжки).
-  const showRating = handledN > 0;
-  const ratingAvg  = stats.rating_avg != null ? Number(stats.rating_avg).toFixed(1) : '—';
+  // Рейтинг: строка показывается всегда, но если ratings нет — справа
+  // выводим текстовую плашку «Нет оценок» вместо «—»+звезды.
+  const hasRating  = stats.rating_avg != null && handledN > 0;
+  const ratingAvg  = hasRating ? Number(stats.rating_avg).toFixed(1) : '';
 
   slot.innerHTML = `
     <div class="page-header">
@@ -113,35 +154,53 @@ export function mountSoloHome(profile) {
             <h3 class="profile-card-title" data-i18n="solo.stats_title">Статистика</h3>
           </div>
           <div class="profile-card-body">
-            <!-- Минималистичный stat-row: иконка-метафора слева,
-                 число справа. Текст-label убран по запросу — иконки
-                 говорят сами, hover-tooltip даёт расшифровку. -->
-            <div class="profile-row stat-row" title="${t('solo.stats_created')}" data-tooltip-key="solo.stats_created">
-              <i class="ph-duotone ph-clipboard-text stat-row-icon" aria-hidden="true"></i>
+            <!-- Текстовые надписи слева, значения справа — так же как
+                 во всех остальных профильных карточках. Иконки убраны
+                 для согласованности с остальным UI. Рейтинг показывается
+                 всегда; если у юзера ещё нет оценок — справа выводим
+                 «Нет оценок» вместо плашки с числом и звездой. -->
+            <div class="profile-row">
+              <span class="profile-row-label" data-i18n="solo.stats_created">Открыто заявок мною</span>
               <span class="profile-row-value">${createdN}</span>
             </div>
-            <div class="profile-row stat-row${showRating ? '' : ' is-last'}" title="${t('solo.stats_handled')}" data-tooltip-key="solo.stats_handled">
-              <i class="ph-duotone ph-check-circle stat-row-icon" aria-hidden="true"></i>
+            <div class="profile-row">
+              <span class="profile-row-label" data-i18n="solo.stats_handled">Закрыто заявок мною</span>
               <span class="profile-row-value">${handledN}</span>
             </div>
-            ${showRating ? `
-            <div class="profile-row stat-row is-last" title="${t('solo.stats_rating')}" data-tooltip-key="solo.stats_rating">
-              <i class="ph-duotone ph-trophy stat-row-icon" aria-hidden="true"></i>
+            <div class="profile-row" style="border-bottom:none;">
+              <span class="profile-row-label" data-i18n="solo.stats_rating">Средняя оценка работы</span>
               <span class="profile-row-value">
-                ${ratingAvg}
-                <i class="ph-duotone ph-star stat-rating-star" aria-hidden="true"></i>
+                ${hasRating
+                  ? `${ratingAvg}<i class="ph-duotone ph-star stat-rating-star" aria-hidden="true" style="margin-left:.35rem;"></i>`
+                  : `<span class="stats-empty" data-i18n="solo.stats_rating_empty">Нет оценок</span>`}
               </span>
-            </div>` : ''}
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- ═══ ПРАВАЯ: Уведомления (естественной высоты) ═══ -->
+      <!-- ═══ ПРАВАЯ: Уведомления ═══ -->
       <div class="profile-col solo-col-right">
         <div class="card profile-card solo-notifs-card">
-          <div class="profile-card-header">
+          <div class="profile-card-header profile-card-header--with-actions">
             <div class="profile-card-icon teal"><i class="ph-bold ph-bell"></i></div>
             <h3 class="profile-card-title" data-i18n="solo.notifications_title">Уведомления</h3>
+            <div class="notif-header-actions">
+              <div class="notif-filter" role="tablist" data-notif-filter-host>
+                <button type="button" class="notif-filter-btn is-active"
+                        data-filter="all" role="tab" aria-selected="true"
+                        data-i18n="notifications.filter_all">Все</button>
+                <button type="button" class="notif-filter-btn"
+                        data-filter="unread" role="tab" aria-selected="false">
+                  <span data-i18n="notifications.filter_unread">Непрочитанные</span>
+                  <span class="notif-filter-count" data-unread-count></span>
+                </button>
+              </div>
+              <button class="btn btn-secondary btn-sm" data-mark-all-read>
+                <i class="ph ph-checks"></i>
+                <span data-i18n="notifications.mark_all">Прочитать все</span>
+              </button>
+            </div>
           </div>
           <div class="profile-card-body" id="solo-notifs-slot">
             <!-- Inline empty-state в строчку (как в общей ленте), иконка
@@ -160,6 +219,36 @@ export function mountSoloHome(profile) {
   // Wire join-modal один раз (idempotent).
   wireJoinOrgModal();
   slot.querySelector('#solo-btn-join')?.addEventListener('click', () => openJoinOrgModal());
+
+  // Invitation accept / reject. Accept → флипает membership на approved
+  // (owner уже одобрил приглашением, дополнительного подтверждения не
+  // требуется). Reject → cancel (= возврат в solo) с уведомлением owner'у.
+  slot.querySelector('#solo-btn-invite-accept')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    setLoading(btn, true);
+    try {
+      await membership.acceptInvitation();
+      toast(t('solo.invitation_accepted_toast') || 'Приглашение принято', 'ok');
+      window.dispatchEvent(new CustomEvent('rems:reload-profile'));
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+  slot.querySelector('#solo-btn-invite-reject')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    setLoading(btn, true);
+    try {
+      await membership.cancel();   // re-uses cancel.delete — owner получит withdrawn-notif
+      toast(t('solo.invitation_rejected_toast') || 'Приглашение отклонено', 'ok');
+      window.dispatchEvent(new CustomEvent('rems:reload-profile'));
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
 
   // Отмена pending-заявки — открывает confirm-модалку.
   slot.querySelector('#solo-btn-cancel')?.addEventListener('click', () => {

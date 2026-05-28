@@ -172,11 +172,13 @@
            customer / contractor role now lives on individual contracts
            between two organisations, not as an attribute of the org. -->
 
-      <!-- Org ID (non-owner) -->
+      <!-- Org ID (non-owner) — НЕОБЯЗАТЕЛЕН. Если пусто — юзер регится
+           как solo (без организации), может позже подать заявку через
+           solo home. Если указан — статус 'pending', owner получит инвайт. -->
       <div class="form-group" id="org-id-group" style="display:none;">
         <label class="form-label" for="org-id">
           <span data-i18n="auth.register.org_id_label">ID организации</span>
-          <span class="req">*</span>
+          <span class="form-label-optional" data-i18n="common.optional">(необязательно)</span>
         </label>
         <div class="input-wrap">
           <i class="ph ph-hash input-icon"></i>
@@ -184,7 +186,7 @@
             data-i18n-ph="auth.register.org_id_ph"
             placeholder="Например: 42">
         </div>
-        <p class="form-hint" data-i18n="auth.register.org_id_hint">После отправки заявки руководитель организации одобрит её или отклонит.</p>
+        <p class="form-hint" data-i18n="auth.register.org_id_hint_optional">Можно оставить пустым — тогда вы зарегистрируетесь без организации и сможете подать заявку позже.</p>
         <div class="form-error" id="err-org-id"><i class="ph ph-warning-circle"></i><span></span></div>
       </div>
 
